@@ -9,7 +9,7 @@ interface AdminBookingModalProps {
 }
 
 export function AdminBookingModal({ date, onClose }: AdminBookingModalProps) {
-    const { users, bookings, addBookingForUser } = useStore();
+    const { users, addBookingForUser } = useStore();
     const [error, setError] = React.useState<string | null>(null);
     const [success, setSuccess] = React.useState(false);
     const [selectedUserId, setSelectedUserId] = React.useState<string>('');
