@@ -1,0 +1,479 @@
+import { useState } from 'react';
+import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw } from 'lucide-react';
+import { useStore } from '../lib/store';
+import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend } from 'date-fns';
+import { ro } from 'date-fns/locale';
+import { calculateUserAvailableDays, usersApi } from '../lib/api';
+
+// Calculate working days (excluding weekends) in a date range
+const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
+    const days = eachDayOfInterval({ start: startDate, end: endDate });
+    return days.filter(day => !isWeekend(day)).length;
+};
+
+export function AdminDashboard() {
+    const { currentUser, logout, bookings, users, setUserMaxVacationDays, resetUserPassword } = useStore();
+    const [view, setView] = useState<'all' | 'report' | 'users'>('all');
+    const [resettingPassword, setResettingPassword] = useState<string | null>(null);
+    const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
+    const [tempDays, setTempDays] = useState<string>('');
+    const [resettingYearly, setResettingYearly] = useState(false);
+
+    // Get all bookings sorted by start date
+    const allBookings = bookings
+        .map(booking => ({
+            ...booking,
+            user: users.find(u => u.id === booking.userId)
+        }))
+        .filter(b => b.user)
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+
+    // Generate monthly report
+    const generateMonthlyReport = () => {
+        const now = new Date();
+        const startYear = new Date(now.getFullYear(), 0, 1);
+        const endYear = new Date(now.getFullYear(), 11, 31);
+        const months = eachMonthOfInterval({ start: startYear, end: endYear });
+
+        return months.map(month => {
+            const monthStart = startOfMonth(month);
+            const monthEnd = endOfMonth(month);
+
+            const bookingsInMonth = bookings.filter(booking => {
+                const bookingStart = new Date(booking.startDate);
+                const bookingEnd = new Date(booking.endDate);
+                
+                // Check if booking overlaps with the month
+                return (
+                    (bookingStart >= monthStart && bookingStart <= monthEnd) ||
+                    (bookingEnd >= monthStart && bookingEnd <= monthEnd) ||
+                    (bookingStart <= monthStart && bookingEnd >= monthEnd)
+                );
+            });
+
+            const reportEntries = bookingsInMonth.map(booking => {
+                const user = users.find(u => u.id === booking.userId);
+                if (!user) return null;
+
+                // Split name into first and last name
+                const nameParts = user.name.split(' ');
+                const firstName = nameParts[0] || '';
+                const lastName = nameParts.slice(1).join(' ') || '';
+
+                // Calculate the period within this month
+                const bookingStart = new Date(booking.startDate);
+                const bookingEnd = new Date(booking.endDate);
+                
+                const periodStart = bookingStart < monthStart ? monthStart : bookingStart;
+                const periodEnd = bookingEnd > monthEnd ? monthEnd : bookingEnd;
+
+                const workingDays = calculateWorkingDays(periodStart, periodEnd);
+                
+                // Calculate remaining days for this user using the new per-user system
+                const userData = users.find(u => u.id === user.id);
+                const remainingDays = userData ? calculateUserAvailableDays(userData, bookings) : 0;
+
+                return {
+                    firstName,
+                    lastName,
+                    fullName: user.name,
+                    role: user.role,
+                    period: `${periodStart.toLocaleDateString('ro-RO', { day: 'numeric', month: 'numeric' })} - ${periodEnd.toLocaleDateString('ro-RO', { day: 'numeric', month: 'numeric' })}`,
+                    startDate: periodStart,
+                    endDate: periodEnd,
+                    workingDays,
+                    userId: user.id,
+                    remainingDays
+                };
+            }).filter(Boolean) as Array<{
+                firstName: string;
+                lastName: string;
+                fullName: string;
+                role: string;
+                period: string;
+                startDate: Date;
+                endDate: Date;
+                workingDays: number;
+                userId: string;
+                remainingDays: number;
+            }>;
+
+            // Sort by last name, then first name
+            reportEntries.sort((a, b) => {
+                if (a.lastName !== b.lastName) {
+                    return a.lastName.localeCompare(b.lastName, 'ro');
+                }
+                return a.firstName.localeCompare(b.firstName, 'ro');
+            });
+
+            return {
+                month,
+                monthName: format(month, 'MMMM yyyy', { locale: ro }),
+                entries: reportEntries
+            };
+        }).filter(month => month.entries.length > 0);
+    };
+
+    const monthlyReport = generateMonthlyReport();
+
+    return (
+        <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+            <div className="max-w-7xl mx-auto">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-900">Panou Administrator</h1>
+                        <p className="text-slate-500">
+                            Bine ai venit, <span className="font-medium text-blue-600">{currentUser?.name}</span>
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={async () => {
+                                if (confirm('Ești sigur că vrei să resetezi zilele de concediu pentru noul an? Această acțiune va calcula zilele rămase din anul anterior și le va adăuga la noul an.')) {
+                                    setResettingYearly(true);
+                                    try {
+                                        await usersApi.resetYearlyVacationDays();
+                                        alert('Resetarea anuală a fost efectuată cu succes!');
+                                        // Reload users to reflect changes
+                                        window.location.reload();
+                                    } catch (error) {
+                                        alert('A apărut o eroare la resetarea anuală.');
+                                    } finally {
+                                        setResettingYearly(false);
+                                    }
+                                }
+                            }}
+                            disabled={resettingYearly}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                            title="Resetează zilele de concediu pentru noul an (rulează în ianuarie)"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${resettingYearly ? 'animate-spin' : ''}`} />
+                            Resetare anuală
+                        </button>
+                        <button
+                            onClick={logout}
+                            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700 transition-colors"
+                        >
+                            <LogOut className="w-4 h-4" />
+                            Deconectare
+                        </button>
+                    </div>
+                </div>
+
+                {/* View Toggle */}
+                <div className="mb-6 flex gap-2">
+                    <button
+                        onClick={() => setView('all')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                            view === 'all'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        <Users className="w-4 h-4" />
+                        Toate rezervările
+                    </button>
+                    <button
+                        onClick={() => setView('report')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                            view === 'report'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        <FileText className="w-4 h-4" />
+                        Raport lunar
+                    </button>
+                    <button
+                        onClick={() => setView('users')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                            view === 'users'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        <Users className="w-4 h-4" />
+                        Gestionare utilizatori
+                    </button>
+                </div>
+
+                {/* All Bookings View */}
+                {view === 'all' && (
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                            <h2 className="text-lg font-semibold text-slate-900">Toate rezervările</h2>
+                        </div>
+                        <div className="p-4">
+                            {allBookings.length === 0 ? (
+                                <p className="text-slate-500 text-center py-8">Nu există rezervări.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {allBookings.map((booking) => (
+                                        <div
+                                            key={booking.id}
+                                            className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200"
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-3 h-3 rounded-full ${
+                                                    booking.user?.role === 'EDUCATOR' ? 'bg-purple-500' : 'bg-emerald-500'
+                                                }`} />
+                                                <div>
+                                                    <p className="font-medium text-slate-900">{booking.user?.name}</p>
+                                                    <p className="text-sm text-slate-500">
+                                                        {booking.user?.role === 'EDUCATOR' ? 'Educatoare' : 'Auxiliar'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-sm text-slate-600">
+                                                <CalendarIcon className="w-4 h-4" />
+                                                <span>
+                                                    {new Date(booking.startDate).toLocaleDateString('ro-RO', {
+                                                        day: 'numeric',
+                                                        month: 'long',
+                                                        year: 'numeric'
+                                                    })}
+                                                    {booking.startDate !== booking.endDate && (
+                                                        <> - {new Date(booking.endDate).toLocaleDateString('ro-RO', {
+                                                            day: 'numeric',
+                                                            month: 'long',
+                                                            year: 'numeric'
+                                                        })}</>
+                                                    )}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Monthly Report View */}
+                {view === 'report' && (
+                    <div className="space-y-6">
+                        {monthlyReport.length === 0 ? (
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                                <p className="text-slate-500 text-center">Nu există date pentru raport.</p>
+                            </div>
+                        ) : (
+                            monthlyReport.map(({ month, monthName, entries }) => (
+                                <div key={month.toISOString()} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                    <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                                        <h2 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h2>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-slate-50">
+                                                <tr>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Nume
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Prenume
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Rol
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Perioadă
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Zile lucrătoare
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Zile rămase
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-200">
+                                                {entries.map((entry, idx) => (
+                                                    <tr 
+                                                        key={idx} 
+                                                        style={entry.role === 'EDUCATOR' ? { backgroundColor: 'rgb(195, 220, 253)' } : undefined}
+                                                        className={`${
+                                                            entry.role === 'EDUCATOR' 
+                                                                ? 'hover:bg-blue-200' 
+                                                                : 'bg-emerald-50 hover:bg-emerald-100'
+                                                        } transition-colors`}
+                                                    >
+                                                        <td className="px-4 py-3 text-sm text-slate-900">
+                                                            {entry.lastName}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-900">
+                                                            {entry.firstName}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">
+                                                            {entry.role === 'EDUCATOR' ? 'Educatoare' : 'Auxiliar'}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">
+                                                            {entry.period}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                                                            {entry.workingDays}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm font-medium">
+                                                            <span className={entry.remainingDays >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                                                                {entry.remainingDays}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+
+                {/* Users Management View */}
+                {view === 'users' && (
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                            <h2 className="text-lg font-semibold text-slate-900">Gestionare utilizatori</h2>
+                        </div>
+                        <div className="p-4">
+                            {users.length === 0 ? (
+                                <p className="text-slate-500 text-center py-8">Nu există utilizatori.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {users.map((user) => {
+                                        const userRemainingDays = calculateUserAvailableDays(user, bookings);
+                                        const maxDays = user.maxVacationDays || 28;
+                                        const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
+                                        
+                                        return (
+                                            <div
+                                                key={user.id}
+                                                className="p-4 bg-slate-50 rounded-lg border border-slate-200"
+                                            >
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-3 h-3 rounded-full ${
+                                                            user.role === 'EDUCATOR' ? 'bg-purple-500' : user.role === 'AUXILIARY' ? 'bg-emerald-500' : 'bg-slate-500'
+                                                        }`} />
+                                                        <div>
+                                                            <p className="font-medium text-slate-900">{user.name}</p>
+                                                            <div className="flex items-center gap-3 text-sm text-slate-500">
+                                                                <span>
+                                                                    {user.role === 'EDUCATOR' ? 'Educatoare' : user.role === 'AUXILIARY' ? 'Auxiliar' : 'Administrator'}
+                                                                </span>
+                                                                {user.username && (
+                                                                    <span className="text-xs bg-slate-200 px-2 py-0.5 rounded">
+                                                                        Username: {user.username}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-sm">
+                                                    <div>
+                                                        <span className="text-slate-600">Zile max/an:</span>
+                                                        {editingDaysForUser === user.id ? (
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <input
+                                                                    type="number"
+                                                                    value={tempDays}
+                                                                    onChange={(e) => setTempDays(e.target.value)}
+                                                                    min="1"
+                                                                    max="365"
+                                                                    className="w-20 px-2 py-1 border border-slate-300 rounded text-sm"
+                                                                    autoFocus
+                                                                />
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        const days = parseInt(tempDays);
+                                                                        if (!isNaN(days) && days > 0) {
+                                                                            const result = await setUserMaxVacationDays(user.id, days);
+                                                                            if (result.success) {
+                                                                                setEditingDaysForUser(null);
+                                                                            } else {
+                                                                                alert(result.error || 'Eroare la actualizare');
+                                                                            }
+                                                                        }
+                                                                    }}
+                                                                    className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                                                                >
+                                                                    Salvează
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setEditingDaysForUser(null);
+                                                                        setTempDays('');
+                                                                    }}
+                                                                    className="px-2 py-1 bg-slate-200 text-slate-700 text-xs rounded hover:bg-slate-300"
+                                                                >
+                                                                    Anulează
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <span className="font-medium text-slate-900">{maxDays}</span>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setTempDays(maxDays.toString());
+                                                                        setEditingDaysForUser(user.id);
+                                                                    }}
+                                                                    className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded hover:bg-slate-200"
+                                                                >
+                                                                    Editează
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-slate-600">Zile rămase din anul anterior:</span>
+                                                        <span className="font-medium text-slate-900 ml-2">{remainingFromPrevious}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-slate-600">Zile disponibile acum:</span>
+                                                        <span className={`font-medium ml-2 ${userRemainingDays >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            {userRemainingDays}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (confirm(`Ești sigur că vrei să resetezi parola pentru ${user.name}? Parola va fi resetată la "12345".`)) {
+                                                                setResettingPassword(user.id);
+                                                                try {
+                                                                    const result = await resetUserPassword(user.id);
+                                                                    if (result.success) {
+                                                                        alert('Parola a fost resetată cu succes!');
+                                                                    } else {
+                                                                        alert(result.error || 'A apărut o eroare la resetarea parolei.');
+                                                                    }
+                                                                } catch (error) {
+                                                                    alert('A apărut o eroare la resetarea parolei.');
+                                                                } finally {
+                                                                    setResettingPassword(null);
+                                                                }
+                                                            }
+                                                        }}
+                                                        disabled={resettingPassword === user.id}
+                                                        className="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {resettingPassword === user.id ? 'Se resetează...' : 'Resetează parola'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
