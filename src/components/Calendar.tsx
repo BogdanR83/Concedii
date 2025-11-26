@@ -1,11 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
     format,
     startOfMonth,
     endOfMonth,
     eachDayOfInterval,
-    isSameMonth,
-    isSameDay,
     addMonths,
     subMonths,
     isWeekend,

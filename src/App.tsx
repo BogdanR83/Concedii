@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from './lib/store';
 import { Login } from './components/Login';
 import { Calendar } from './components/Calendar';

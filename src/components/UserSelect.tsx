@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from '../lib/store';
 import { User } from 'lucide-react';
 
@@ -23,13 +22,18 @@ export function UserSelect() {
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
                     {users.map((user) => {
                         const isEducator = user.role === 'EDUCATOR';
-                        const isAuxiliary = user.role === 'AUXILIARY';
                         const isAdmin = user.role === 'ADMIN';
                         
                         return (
                             <button
                                 key={user.id}
-                                onClick={() => login(user.id)}
+                                onClick={() => {
+                                    // UserSelect is deprecated - should use Login component
+                                    // This is kept for backward compatibility
+                                    if (user.username) {
+                                        login(user.username, '12345');
+                                    }
+                                }}
                                 style={isEducator ? { backgroundColor: 'rgb(195, 220, 253)' } : undefined}
                                 className={`w-full text-left p-4 rounded-lg border transition-all group ${
                                     isAdmin 

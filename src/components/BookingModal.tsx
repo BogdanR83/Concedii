@@ -9,7 +9,7 @@ interface BookingModalProps {
 }
 
 export function BookingModal({ date, onClose }: BookingModalProps) {
-    const { addBooking, bookings, users, currentUser } = useStore();
+    const { addBooking, bookings, users } = useStore();
     const [error, setError] = React.useState<string | null>(null);
     const [success, setSuccess] = React.useState(false);
     const [startDate, setStartDate] = React.useState<string>(formatDate(date));
