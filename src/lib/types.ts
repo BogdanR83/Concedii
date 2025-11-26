@@ -33,5 +33,6 @@ export type BookingState = {
     resetUserPassword: (userId: string) => Promise<{ success: boolean; error?: string }>;
     setUserMaxVacationDays: (userId: string, days: number) => Promise<{ success: boolean; error?: string }>;
     addBooking: (startDate: string, endDate: string) => Promise<{ success: boolean; error?: string }>;
+    addBookingForUser: (userId: string, startDate: string, endDate: string) => Promise<{ success: boolean; error?: string }>;
     removeBooking: (bookingId: string) => Promise<void>;
 };

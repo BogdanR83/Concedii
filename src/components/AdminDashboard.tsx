@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { calculateUserAvailableDays, usersApi } from '../lib/api';
-import { formatDate } from '../lib/utils';
+import { AdminBookingModal } from './AdminBookingModal';
 
 // Calculate working days (excluding weekends) in a date range
 const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
@@ -13,13 +13,14 @@ const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
 };
 
 export function AdminDashboard() {
-    const { currentUser, logout, bookings, users, setUserMaxVacationDays, resetUserPassword } = useStore();
+    const { currentUser, logout, bookings, users, setUserMaxVacationDays, resetUserPassword, removeBooking } = useStore();
     const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar'>('calendar');
     const [resettingPassword, setResettingPassword] = useState<string | null>(null);
     const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
     const [tempDays, setTempDays] = useState<string>('');
     const [resettingYearly, setResettingYearly] = useState(false);
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDateForBooking, setSelectedDateForBooking] = useState<Date | null>(null);
 
     // Get all bookings sorted by start date
     const allBookings = bookings
@@ -31,11 +32,10 @@ export function AdminDashboard() {
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
 
-    // Generate monthly report
+    // Generate monthly report for 2025 and 2026
     const generateMonthlyReport = () => {
-        const now = new Date();
-        const startYear = new Date(now.getFullYear(), 0, 1);
-        const endYear = new Date(now.getFullYear(), 11, 31);
+        const startYear = new Date(2025, 0, 1);
+        const endYear = new Date(2026, 11, 31);
         const months = eachMonthOfInterval({ start: startYear, end: endYear });
 
         return months.map(month => {
@@ -72,9 +72,60 @@ export function AdminDashboard() {
 
                 const workingDays = calculateWorkingDays(periodStart, periodEnd);
                 
-                // Calculate remaining days for this user using the new per-user system
+                // Calculate remaining days for this user at the end of this month
                 const userData = users.find(u => u.id === user.id);
-                const remainingDays = userData ? calculateUserAvailableDays(userData, bookings) : 0;
+                if (!userData) return null;
+                
+                const currentYear = month.getFullYear();
+                const maxDays = userData.maxVacationDays || 28;
+                
+                // Calculate remaining days from previous year
+                let effectiveRemainingFromPrevious = userData.remainingDaysFromPreviousYear || 0;
+                
+                // For 2026, calculate what was remaining at end of 2025
+                if (currentYear === 2026) {
+                    const bookings2025 = bookings.filter(b => {
+                        if (b.userId !== user.id) return false;
+                        const bookingYear = new Date(b.startDate).getFullYear();
+                        return bookingYear === 2025;
+                    });
+                    
+                    let usedDays2025 = 0;
+                    bookings2025.forEach(booking => {
+                        const start = new Date(booking.startDate);
+                        const end = new Date(booking.endDate);
+                        const days = eachDayOfInterval({ start, end });
+                        usedDays2025 += days.filter(day => !isWeekend(day)).length;
+                    });
+                    
+                    const total2025 = maxDays + (userData.remainingDaysFromPreviousYear || 0);
+                    effectiveRemainingFromPrevious = Math.max(0, total2025 - usedDays2025);
+                }
+                
+                // Calculate used days up to the end of this month
+                const bookingsUpToMonth = bookings.filter(b => {
+                    if (b.userId !== user.id) return false;
+                    const bookingDate = new Date(b.startDate);
+                    const bookingYear = bookingDate.getFullYear();
+                    const bookingMonth = bookingDate.getMonth();
+                    
+                    if (bookingYear < currentYear) return true;
+                    if (bookingYear > currentYear) return false;
+                    return bookingMonth <= month.getMonth();
+                });
+                
+                // Calculate working days used up to end of this month
+                let usedDaysUpToMonth = 0;
+                bookingsUpToMonth.forEach(booking => {
+                    const start = new Date(booking.startDate);
+                    const end = new Date(booking.endDate);
+                    const days = eachDayOfInterval({ start, end });
+                    usedDaysUpToMonth += days.filter(day => !isWeekend(day)).length;
+                });
+                
+                // Calculate remaining days at end of this month
+                const totalAvailable = maxDays + effectiveRemainingFromPrevious;
+                const remainingDays = totalAvailable - usedDaysUpToMonth;
 
                 return {
                     firstName,
@@ -219,14 +270,31 @@ export function AdminDashboard() {
                     const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
                     
                     const getBookingsForDate = (date: Date) => {
-                        const dateStr = formatDate(date);
-                        const dateObj = new Date(dateStr);
+                        // Normalize date to start of day in local timezone
+                        const dateYear = date.getFullYear();
+                        const dateMonth = date.getMonth();
+                        const dateDay = date.getDate();
                         
                         return bookings
                             .filter(b => {
                                 const bStart = new Date(b.startDate);
                                 const bEnd = new Date(b.endDate);
-                                return dateObj >= bStart && dateObj <= bEnd;
+                                
+                                // Normalize booking dates to start of day in local timezone
+                                const bStartYear = bStart.getFullYear();
+                                const bStartMonth = bStart.getMonth();
+                                const bStartDay = bStart.getDate();
+                                
+                                const bEndYear = bEnd.getFullYear();
+                                const bEndMonth = bEnd.getMonth();
+                                const bEndDay = bEnd.getDate();
+                                
+                                // Compare dates without time/timezone
+                                const dateTime = new Date(dateYear, dateMonth, dateDay).getTime();
+                                const startTime = new Date(bStartYear, bStartMonth, bStartDay).getTime();
+                                const endTime = new Date(bEndYear, bEndMonth, bEndDay).getTime();
+                                
+                                return dateTime >= startTime && dateTime <= endTime;
                             })
                             .map(b => ({
                                 ...b,
@@ -241,6 +309,12 @@ export function AdminDashboard() {
                                 <div className="flex items-center justify-between">
                                     <h2 className="text-lg font-semibold text-slate-900">Calendar Concedii</h2>
                                     <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setSelectedDateForBooking(new Date())}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                                        >
+                                            + Adaugă Rezervare
+                                        </button>
                                         <button
                                             onClick={() => setCurrentDate(subMonths(currentDate, 1))}
                                             className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -311,25 +385,43 @@ export function AdminDashboard() {
                                                     if (!user) return null;
                                                     
                                                     const isEducator = user.role === 'EDUCATOR';
-                                                    const isAuxiliary = user.role === 'AUXILIARY';
+                                                    const isAdmin = user.role === 'ADMIN';
                                                     
                                                     return (
                                                         <div
                                                             key={booking.id}
                                                             className={`
-                                                                text-xs p-1.5 rounded truncate
-                                                                ${isEducator 
+                                                                text-xs p-1.5 rounded group relative
+                                                                ${isAdmin
+                                                                    ? 'bg-purple-100 text-purple-900 border border-purple-200' 
+                                                                    : isEducator 
                                                                     ? 'bg-blue-100 text-blue-900 border border-blue-200' 
-                                                                    : isAuxiliary
-                                                                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
-                                                                    : 'bg-slate-100 text-slate-900 border border-slate-200'
+                                                                    : 'bg-emerald-100 text-emerald-900 border border-emerald-200'
                                                                 }
                                                             `}
-                                                            title={`${user.name} - ${user.role === 'EDUCATOR' ? 'Educatoare' : user.role === 'AUXILIARY' ? 'Auxiliar' : 'Admin'}`}
+                                                            title={`${user.name} - ${user.role === 'ADMIN' ? 'Administrator' : user.role === 'EDUCATOR' ? 'Educatoare' : 'Auxiliar'}`}
                                                         >
-                                                            <div className="font-medium truncate">{user.name.split(' ')[0]}</div>
-                                                            <div className="text-[10px] opacity-75 truncate">
-                                                                {user.name.split(' ').slice(1).join(' ')}
+                                                            <div className="flex items-center justify-between gap-1">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="font-medium truncate">{user.name.split(' ')[0]}</div>
+                                                                    <div className="text-[10px] opacity-75 truncate">
+                                                                        {user.name.split(' ').slice(1).join(' ')}
+                                                                    </div>
+                                                                </div>
+                                                                <button
+                                                                    onClick={async (e) => {
+                                                                        e.stopPropagation();
+                                                                        if (confirm(`Ești sigur că vrei să ștergi rezervarea pentru ${user.name}?`)) {
+                                                                            await removeBooking(booking.id);
+                                                                            // Reload to refresh calendar
+                                                                            window.location.reload();
+                                                                        }
+                                                                    }}
+                                                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-200 rounded text-red-600 hover:text-red-800"
+                                                                    title="Șterge rezervarea"
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </button>
                                                             </div>
                                                         </div>
                                                     );
@@ -361,12 +453,16 @@ export function AdminDashboard() {
                                         >
                                             <div className="flex items-center gap-4">
                                                 <div className={`w-3 h-3 rounded-full ${
-                                                    booking.user?.role === 'EDUCATOR' ? 'bg-purple-500' : 'bg-emerald-500'
+                                                    booking.user?.role === 'ADMIN' ? 'bg-purple-400' 
+                                                    : booking.user?.role === 'EDUCATOR' ? 'bg-blue-500' 
+                                                    : 'bg-emerald-500'
                                                 }`} />
                                                 <div>
                                                     <p className="font-medium text-slate-900">{booking.user?.name}</p>
                                                     <p className="text-sm text-slate-500">
-                                                        {booking.user?.role === 'EDUCATOR' ? 'Educatoare' : 'Auxiliar'}
+                                                        {booking.user?.role === 'ADMIN' ? 'Administrator' 
+                                                        : booking.user?.role === 'EDUCATOR' ? 'Educatoare' 
+                                                        : 'Auxiliar'}
                                                     </p>
                                                 </div>
                                             </div>
@@ -436,11 +532,17 @@ export function AdminDashboard() {
                                                 {entries.map((entry, idx) => (
                                                     <tr 
                                                         key={idx} 
-                                                        style={entry.role === 'EDUCATOR' ? { backgroundColor: 'rgb(195, 220, 253)' } : undefined}
+                                                        style={
+                                                            entry.role === 'ADMIN' ? { backgroundColor: 'rgb(221, 214, 254)' } 
+                                                            : entry.role === 'EDUCATOR' ? { backgroundColor: 'rgb(195, 220, 253)' } 
+                                                            : { backgroundColor: 'rgb(209, 250, 229)' }
+                                                        }
                                                         className={`${
-                                                            entry.role === 'EDUCATOR' 
+                                                            entry.role === 'ADMIN'
+                                                                ? 'hover:bg-purple-200'
+                                                                : entry.role === 'EDUCATOR' 
                                                                 ? 'hover:bg-blue-200' 
-                                                                : 'bg-emerald-50 hover:bg-emerald-100'
+                                                                : 'hover:bg-emerald-200'
                                                         } transition-colors`}
                                                     >
                                                         <td className="px-4 py-3 text-sm text-slate-900">
@@ -450,7 +552,9 @@ export function AdminDashboard() {
                                                             {entry.firstName}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm text-slate-600">
-                                                            {entry.role === 'EDUCATOR' ? 'Educatoare' : 'Auxiliar'}
+                                                            {entry.role === 'ADMIN' ? 'Administrator' 
+                                                            : entry.role === 'EDUCATOR' ? 'Educatoare' 
+                                                            : 'Auxiliar'}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm text-slate-600">
                                                             {entry.period}
@@ -498,13 +602,18 @@ export function AdminDashboard() {
                                                 <div className="flex items-center justify-between mb-3">
                                                     <div className="flex items-center gap-4">
                                                         <div className={`w-3 h-3 rounded-full ${
-                                                            user.role === 'EDUCATOR' ? 'bg-purple-500' : user.role === 'AUXILIARY' ? 'bg-emerald-500' : 'bg-slate-500'
+                                                            user.role === 'ADMIN' ? 'bg-purple-400' 
+                                                            : user.role === 'EDUCATOR' ? 'bg-blue-500' 
+                                                            : user.role === 'AUXILIARY' ? 'bg-emerald-500' 
+                                                            : 'bg-slate-500'
                                                         }`} />
                                                         <div>
                                                             <p className="font-medium text-slate-900">{user.name}</p>
                                                             <div className="flex items-center gap-3 text-sm text-slate-500">
                                                                 <span>
-                                                                    {user.role === 'EDUCATOR' ? 'Educatoare' : user.role === 'AUXILIARY' ? 'Auxiliar' : 'Administrator'}
+                                                                    {user.role === 'ADMIN' ? 'Administrator' 
+                                                                    : user.role === 'EDUCATOR' ? 'Educatoare' 
+                                                                    : 'Auxiliar'}
                                                                 </span>
                                                                 {user.username && (
                                                                     <span className="text-xs bg-slate-200 px-2 py-0.5 rounded">
@@ -615,6 +724,14 @@ export function AdminDashboard() {
                             )}
                         </div>
                     </div>
+                )}
+
+                {/* Admin Booking Modal */}
+                {selectedDateForBooking && (
+                    <AdminBookingModal
+                        date={selectedDateForBooking}
+                        onClose={() => setSelectedDateForBooking(null)}
+                    />
                 )}
             </div>
         </div>

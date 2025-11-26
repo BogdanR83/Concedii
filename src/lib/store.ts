@@ -221,6 +221,45 @@ export const useStore = create<BookingState>()(
                 return { success: true };
             },
 
+            addBookingForUser: async (userId: string, startDate: string, endDate: string) => {
+                // Admin function - no restrictions, can book for any user
+                const { bookings } = get();
+
+                // Basic validation
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+
+                if (start > end) {
+                    return { success: false, error: 'Data de început trebuie să fie înainte de data de sfârșit.' };
+                }
+
+                // Create booking
+                const newBooking: Booking = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    userId,
+                    startDate,
+                    endDate,
+                    createdAt: Date.now(),
+                };
+
+                // Save to Supabase if configured
+                if (isSupabaseConfigured()) {
+                    try {
+                        await bookingsApi.create({
+                            userId,
+                            startDate,
+                            endDate,
+                        });
+                    } catch (error) {
+                        console.error('Error saving booking to Supabase:', error);
+                        return { success: false, error: 'A apărut o eroare la salvarea rezervării.' };
+                    }
+                }
+
+                set({ bookings: [...bookings, newBooking] });
+                return { success: true };
+            },
+
             removeBooking: async (bookingId: string) => {
                 // Delete from Supabase if configured
                 if (isSupabaseConfigured()) {
