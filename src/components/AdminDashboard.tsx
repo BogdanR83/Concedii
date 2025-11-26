@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw } from 'lucide-react';
+import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { calculateUserAvailableDays, usersApi } from '../lib/api';
+import { formatDate } from '../lib/utils';
 
 // Calculate working days (excluding weekends) in a date range
 const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
@@ -13,11 +14,12 @@ const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
 
 export function AdminDashboard() {
     const { currentUser, logout, bookings, users, setUserMaxVacationDays, resetUserPassword } = useStore();
-    const [view, setView] = useState<'all' | 'report' | 'users'>('all');
+    const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar'>('calendar');
     const [resettingPassword, setResettingPassword] = useState<string | null>(null);
     const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
     const [tempDays, setTempDays] = useState<string>('');
     const [resettingYearly, setResettingYearly] = useState(false);
+    const [currentDate, setCurrentDate] = useState(new Date());
 
     // Get all bookings sorted by start date
     const allBookings = bookings
@@ -163,7 +165,18 @@ export function AdminDashboard() {
                 </div>
 
                 {/* View Toggle */}
-                <div className="mb-6 flex gap-2">
+                <div className="mb-6 flex gap-2 flex-wrap">
+                    <button
+                        onClick={() => setView('calendar')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                            view === 'calendar'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        <CalendarIcon className="w-4 h-4" />
+                        Calendar
+                    </button>
                     <button
                         onClick={() => setView('all')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
@@ -198,6 +211,137 @@ export function AdminDashboard() {
                         Gestionare utilizatori
                     </button>
                 </div>
+
+                {/* Calendar View */}
+                {view === 'calendar' && (() => {
+                    const monthStart = startOfMonth(currentDate);
+                    const monthEnd = endOfMonth(currentDate);
+                    const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+                    
+                    const getBookingsForDate = (date: Date) => {
+                        const dateStr = formatDate(date);
+                        const dateObj = new Date(dateStr);
+                        
+                        return bookings
+                            .filter(b => {
+                                const bStart = new Date(b.startDate);
+                                const bEnd = new Date(b.endDate);
+                                return dateObj >= bStart && dateObj <= bEnd;
+                            })
+                            .map(b => ({
+                                ...b,
+                                user: users.find(u => u.id === b.userId)
+                            }))
+                            .filter(b => b.user);
+                    };
+
+                    return (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-lg font-semibold text-slate-900">Calendar Concedii</h2>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setCurrentDate(subMonths(currentDate, 1))}
+                                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                        >
+                                            <ChevronLeft className="w-5 h-5 text-slate-600" />
+                                        </button>
+                                        <h3 className="text-md font-medium text-slate-700 min-w-[180px] text-center capitalize">
+                                            {format(currentDate, 'MMMM yyyy', { locale: ro })}
+                                        </h3>
+                                        <button
+                                            onClick={() => setCurrentDate(addMonths(currentDate, 1))}
+                                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                        >
+                                            <ChevronRight className="w-5 h-5 text-slate-600" />
+                                        </button>
+                                        <button
+                                            onClick={() => setCurrentDate(new Date())}
+                                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                        >
+                                            Astăzi
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Calendar Grid */}
+                            <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+                                {['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'].map((day) => (
+                                    <div key={day} className="p-3 text-center text-sm font-medium text-slate-500 border-r border-slate-200 last:border-r-0">
+                                        {day}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-7 auto-rows-fr">
+                                {/* Empty cells for start of month */}
+                                {Array.from({ length: (monthStart.getDay() + 6) % 7 }).map((_, i) => (
+                                    <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100 min-h-[140px]" />
+                                ))}
+
+                                {days.map((day) => {
+                                    const isWknd = isWeekend(day);
+                                    const dayBookings = getBookingsForDate(day);
+                                    const isPast = day < new Date(new Date().setHours(0, 0, 0, 0));
+                                    
+                                    return (
+                                        <div
+                                            key={day.toISOString()}
+                                            className={`
+                                                min-h-[140px] p-2 border-b border-r border-slate-100 relative
+                                                ${isWknd ? 'bg-slate-50/50' : 'bg-white'}
+                                                ${isToday(day) ? 'ring-2 ring-inset ring-blue-500/50' : ''}
+                                            `}
+                                        >
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className={`
+                                                    text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full
+                                                    ${isToday(day) ? 'bg-blue-600 text-white' : 'text-slate-700'}
+                                                    ${isPast ? 'opacity-50' : ''}
+                                                `}>
+                                                    {format(day, 'd')}
+                                                </span>
+                                            </div>
+                                            
+                                            <div className="space-y-1 mt-1">
+                                                {dayBookings.map((booking) => {
+                                                    const user = booking.user;
+                                                    if (!user) return null;
+                                                    
+                                                    const isEducator = user.role === 'EDUCATOR';
+                                                    const isAuxiliary = user.role === 'AUXILIARY';
+                                                    
+                                                    return (
+                                                        <div
+                                                            key={booking.id}
+                                                            className={`
+                                                                text-xs p-1.5 rounded truncate
+                                                                ${isEducator 
+                                                                    ? 'bg-blue-100 text-blue-900 border border-blue-200' 
+                                                                    : isAuxiliary
+                                                                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                                                                    : 'bg-slate-100 text-slate-900 border border-slate-200'
+                                                                }
+                                                            `}
+                                                            title={`${user.name} - ${user.role === 'EDUCATOR' ? 'Educatoare' : user.role === 'AUXILIARY' ? 'Auxiliar' : 'Admin'}`}
+                                                        >
+                                                            <div className="font-medium truncate">{user.name.split(' ')[0]}</div>
+                                                            <div className="text-[10px] opacity-75 truncate">
+                                                                {user.name.split(' ').slice(1).join(' ')}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {/* All Bookings View */}
                 {view === 'all' && (
