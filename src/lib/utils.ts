@@ -3,7 +3,7 @@ import type { User } from './types';
 export const MOCK_USERS: User[] = [
     { id: 'admin-rusanescu', name: 'Rusănescu Irina Petruța', role: 'ADMIN' },
     { id: 'admin-tarsitu', name: 'Tarșițu Roxana', role: 'ADMIN' },
-    { id: '1', name: 'Popa Ana-Maria', role: 'EDUCATOR' },
+    { id: '1', name: 'Stancu Ana-Maria', role: 'EDUCATOR' },
     { id: '2', name: 'Brișculescu Mihaela', role: 'EDUCATOR' },
     { id: '3', name: 'Monoreanu Paula', role: 'EDUCATOR' },
     { id: '4', name: 'Chirilă Aurelia', role: 'EDUCATOR' },
