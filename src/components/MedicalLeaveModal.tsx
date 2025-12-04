@@ -216,4 +216,3 @@ export function MedicalLeaveModal({ onClose }: MedicalLeaveModalProps) {
         </div>
     );
 }
-

@@ -871,4 +871,3 @@ export function AdminDashboard() {
         </div>
     );
 }
-
