@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { BookingState, Booking, User } from './types';
-import { MOCK_USERS, formatDate } from './utils';
-import { usersApi, bookingsApi } from './api';
+import type { BookingState, Booking, User, MedicalLeave } from './types';
+import { MOCK_USERS, formatDate, isDateRangeInSpecialPeriod, calculateWorkingDaysExcludingHolidays } from './utils';
+import { usersApi, bookingsApi, medicalLeaveApi } from './api';
 
 // Check if Supabase is configured
 const isSupabaseConfigured = () => {
@@ -24,6 +24,7 @@ export const useStore = create<BookingState>()(
                     return a.name.localeCompare(b.name, 'ro');
                 }),
                 bookings: [] as Booking[],
+                medicalLeaves: [] as MedicalLeave[],
             };
 
             // Load data from Supabase if configured (async, won't block initial render)
@@ -51,6 +52,15 @@ export const useStore = create<BookingState>()(
                     })
                     .catch(err => {
                         console.error('Failed to load bookings from Supabase:', err);
+                    });
+
+                // Load medical leaves
+                medicalLeaveApi.getAll()
+                    .then(medicalLeaves => {
+                        set({ medicalLeaves });
+                    })
+                    .catch(err => {
+                        console.error('Failed to load medical leaves from Supabase:', err);
                     });
             }
 
@@ -160,37 +170,43 @@ export const useStore = create<BookingState>()(
                     return { success: false, error: 'Ai deja concediu în această perioadă.' };
                 }
 
-                // Check constraints for each day in the period
-                const startDateObj = new Date(startDate);
-                const endDateObj = new Date(endDate);
-                const daysToCheck: string[] = [];
-                
-                for (let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
-                    daysToCheck.push(formatDate(d));
-                }
+                // Check if the date range is in a special period (no restrictions)
+                const isSpecialPeriod = isDateRangeInSpecialPeriod(startDate, endDate);
 
-                // Check each day in the period
-                for (const dateStr of daysToCheck) {
-                    // Get all bookings that overlap with this date
-                    const bookingsOnDate = bookings.filter((b) => {
-                        const bStart = new Date(b.startDate);
-                        const bEnd = new Date(b.endDate);
-                        const checkDate = new Date(dateStr);
-                        return checkDate >= bStart && checkDate <= bEnd;
-                    });
-
-                    // Get roles of people booked on this date
-                    const bookedUsers = bookingsOnDate.map(b => users.find(u => u.id === b.userId)).filter(Boolean) as User[];
-
-                    const educatorsCount = bookedUsers.filter(u => u.role === 'EDUCATOR').length;
-                    const auxiliaryCount = bookedUsers.filter(u => u.role === 'AUXILIARY').length;
-
-                    if (currentUser.role === 'EDUCATOR' && educatorsCount >= 1) {
-                        return { success: false, error: `Există deja o educatoare în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
+                // Only check constraints if NOT in special period
+                if (!isSpecialPeriod) {
+                    // Check constraints for each day in the period
+                    const startDateObj = new Date(startDate);
+                    const endDateObj = new Date(endDate);
+                    const daysToCheck: string[] = [];
+                    
+                    for (let d = new Date(startDateObj); d <= endDateObj; d.setDate(d.getDate() + 1)) {
+                        daysToCheck.push(formatDate(d));
                     }
 
-                    if (currentUser.role === 'AUXILIARY' && auxiliaryCount >= 1) {
-                        return { success: false, error: `Există deja o persoană auxiliară în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
+                    // Check each day in the period
+                    for (const dateStr of daysToCheck) {
+                        // Get all bookings that overlap with this date
+                        const bookingsOnDate = bookings.filter((b) => {
+                            const bStart = new Date(b.startDate);
+                            const bEnd = new Date(b.endDate);
+                            const checkDate = new Date(dateStr);
+                            return checkDate >= bStart && checkDate <= bEnd;
+                        });
+
+                        // Get roles of people booked on this date
+                        const bookedUsers = bookingsOnDate.map(b => users.find(u => u.id === b.userId)).filter(Boolean) as User[];
+
+                        const educatorsCount = bookedUsers.filter(u => u.role === 'EDUCATOR').length;
+                        const auxiliaryCount = bookedUsers.filter(u => u.role === 'AUXILIARY').length;
+
+                        if (currentUser.role === 'EDUCATOR' && educatorsCount >= 1) {
+                            return { success: false, error: `Există deja o educatoare în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
+                        }
+
+                        if (currentUser.role === 'AUXILIARY' && auxiliaryCount >= 1) {
+                            return { success: false, error: `Există deja o persoană auxiliară în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
+                        }
                     }
                 }
 
@@ -232,6 +248,8 @@ export const useStore = create<BookingState>()(
                 if (start > end) {
                     return { success: false, error: 'Data de început trebuie să fie înainte de data de sfârșit.' };
                 }
+
+                // No restrictions for admin bookings - they can book for anyone at any time
 
                 // Create booking
                 const newBooking: Booking = {
@@ -291,6 +309,74 @@ export const useStore = create<BookingState>()(
                     }
                 }
                 return { success: false, error: 'Funcționalitatea nu este disponibilă.' };
+            },
+
+            addMedicalLeave: async (userId: string, startDate: string, endDate: string, diseaseCode: string) => {
+                const { medicalLeaves } = get();
+                const currentYear = new Date().getFullYear();
+
+                // Basic validation
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+
+                if (start > end) {
+                    return { success: false, error: 'Data de început trebuie să fie înainte de data de sfârșit.' };
+                }
+
+                // Medical leave can be added at any time (no restrictions)
+
+                // Create medical leave
+                const newMedicalLeave: MedicalLeave = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    userId,
+                    startDate,
+                    endDate,
+                    diseaseCode,
+                    workingDays: 0, // Will be calculated by API
+                    year: currentYear,
+                    createdAt: Date.now(),
+                };
+
+                // Save to Supabase if configured
+                if (isSupabaseConfigured()) {
+                    try {
+                        const saved = await medicalLeaveApi.create({
+                            userId,
+                            startDate,
+                            endDate,
+                            diseaseCode,
+                            workingDays: 0,
+                            year: currentYear,
+                        });
+                        set({ medicalLeaves: [...medicalLeaves, saved] });
+                        return { success: true };
+                    } catch (error) {
+                        console.error('Error saving medical leave to Supabase:', error);
+                        return { success: false, error: 'A apărut o eroare la salvarea concediului medical.' };
+                    }
+                }
+
+                // Fallback: calculate working days locally (excluding holidays)
+                const workingDays = await calculateWorkingDaysExcludingHolidays(start, end);
+                newMedicalLeave.workingDays = workingDays;
+
+                set({ medicalLeaves: [...medicalLeaves, newMedicalLeave] });
+                return { success: true };
+            },
+
+            removeMedicalLeave: async (medicalLeaveId: string) => {
+                // Delete from Supabase if configured
+                if (isSupabaseConfigured()) {
+                    try {
+                        await medicalLeaveApi.delete(medicalLeaveId);
+                    } catch (error) {
+                        console.error('Error deleting medical leave from Supabase:', error);
+                    }
+                }
+
+                set((state) => ({
+                    medicalLeaves: state.medicalLeaves.filter((ml) => ml.id !== medicalLeaveId),
+                }));
             },
             };
         },

@@ -1,34 +1,64 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday } from 'date-fns';
 import { ro } from 'date-fns/locale';
-import { calculateUserAvailableDays, usersApi } from '../lib/api';
+import { calculateUserAvailableDaysSync, usersApi } from '../lib/api';
 import { AdminBookingModal } from './AdminBookingModal';
-
-// Calculate working days (excluding weekends) in a date range
-const calculateWorkingDays = (startDate: Date, endDate: Date): number => {
-    const days = eachDayOfInterval({ start: startDate, end: endDate });
-    return days.filter(day => !isWeekend(day)).length;
-};
+import { formatDate, getHolidayDates, calculateWorkingDaysExcludingHolidaysSync } from '../lib/utils';
 
 export function AdminDashboard() {
-    const { currentUser, logout, bookings, users, setUserMaxVacationDays, resetUserPassword, removeBooking } = useStore();
+    const { currentUser, logout, bookings, medicalLeaves, users, setUserMaxVacationDays, resetUserPassword, removeBooking, removeMedicalLeave } = useStore();
     const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar'>('calendar');
     const [resettingPassword, setResettingPassword] = useState<string | null>(null);
     const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
     const [tempDays, setTempDays] = useState<string>('');
+    const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
     const [resettingYearly, setResettingYearly] = useState(false);
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDateForBooking, setSelectedDateForBooking] = useState<Date | null>(null);
+
+    // Load holidays for the current year and next year
+    useEffect(() => {
+        const loadHolidays = async () => {
+            const currentYear = currentDate.getFullYear();
+            const nextYear = currentYear + 1;
+            
+            const [currentYearHolidays, nextYearHolidays] = await Promise.all([
+                getHolidayDates(currentYear),
+                getHolidayDates(nextYear)
+            ]);
+            
+            const allHolidays = [...currentYearHolidays, ...nextYearHolidays];
+            const holidaySet = new Set(allHolidays.map(d => formatDate(d)));
+            setHolidayDates(holidaySet);
+        };
+        
+        loadHolidays();
+    }, [currentDate.getFullYear()]);
 
     // Get all bookings sorted by start date
     const allBookings = bookings
         .map(booking => ({
             ...booking,
-            user: users.find(u => u.id === booking.userId)
+            user: users.find(u => u.id === booking.userId),
+            type: 'vacation' as const
         }))
         .filter(b => b.user)
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    // Get all medical leaves sorted by start date
+    const allMedicalLeaves = medicalLeaves
+        .map(ml => ({
+            ...ml,
+            user: users.find(u => u.id === ml.userId),
+            type: 'medical' as const
+        }))
+        .filter(ml => ml.user)
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    // Combine bookings and medical leaves
+    const allRecords = [...allBookings, ...allMedicalLeaves]
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
 
@@ -54,8 +84,30 @@ export function AdminDashboard() {
                 );
             });
 
-            const reportEntries = bookingsInMonth.map(booking => {
-                const user = users.find(u => u.id === booking.userId);
+            const medicalLeavesInMonth = medicalLeaves.filter(ml => {
+                const mlStart = new Date(ml.startDate);
+                const mlEnd = new Date(ml.endDate);
+                
+                // Check if medical leave overlaps with the month
+                return (
+                    (mlStart >= monthStart && mlStart <= monthEnd) ||
+                    (mlEnd >= monthStart && mlEnd <= monthEnd) ||
+                    (mlStart <= monthStart && mlEnd >= monthEnd)
+                );
+            });
+
+            // Combine bookings and medical leaves for report
+            const allEntriesInMonth = [
+                ...bookingsInMonth.map(b => ({ ...b, type: 'vacation' as const })),
+                ...medicalLeavesInMonth.map(ml => ({ ...ml, type: 'medical' as const }))
+            ];
+
+            const reportEntries = allEntriesInMonth.map(entry => {
+                const isMedical = entry.type === 'medical';
+                const booking = isMedical ? null : entry as any;
+                const medicalLeave = isMedical ? entry as any : null;
+                const userId = isMedical ? medicalLeave.userId : booking.userId;
+                const user = users.find(u => u.id === userId);
                 if (!user) return null;
 
                 // Split name into first and last name
@@ -64,19 +116,27 @@ export function AdminDashboard() {
                 const lastName = nameParts.slice(1).join(' ') || '';
 
                 // Calculate the period within this month
-                const bookingStart = new Date(booking.startDate);
-                const bookingEnd = new Date(booking.endDate);
+                const entryStart = isMedical ? new Date(medicalLeave.startDate) : new Date(booking.startDate);
+                const entryEnd = isMedical ? new Date(medicalLeave.endDate) : new Date(booking.endDate);
                 
-                const periodStart = bookingStart < monthStart ? monthStart : bookingStart;
-                const periodEnd = bookingEnd > monthEnd ? monthEnd : bookingEnd;
+                const periodStart = entryStart < monthStart ? monthStart : entryStart;
+                const periodEnd = entryEnd > monthEnd ? monthEnd : entryEnd;
 
-                const workingDays = calculateWorkingDays(periodStart, periodEnd);
+                const workingDays = isMedical ? medicalLeave.workingDays : calculateWorkingDaysExcludingHolidaysSync(periodStart, periodEnd, holidayDates);
+                
+                // For medical leave, get total CM days for this user in current year
+                const currentYear = month.getFullYear();
+                let totalMedicalLeaveDays = 0;
+                if (isMedical) {
+                    const userMedicalLeaves = medicalLeaves.filter(ml => 
+                        ml.userId === userId && ml.year === currentYear
+                    );
+                    totalMedicalLeaveDays = userMedicalLeaves.reduce((sum, ml) => sum + ml.workingDays, 0);
+                }
                 
                 // Calculate remaining days for this user at the end of this month
                 const userData = users.find(u => u.id === user.id);
                 if (!userData) return null;
-                
-                const currentYear = month.getFullYear();
                 const maxDays = userData.maxVacationDays || 28;
                 
                 // Calculate remaining days from previous year
@@ -94,8 +154,7 @@ export function AdminDashboard() {
                     bookings2025.forEach(booking => {
                         const start = new Date(booking.startDate);
                         const end = new Date(booking.endDate);
-                        const days = eachDayOfInterval({ start, end });
-                        usedDays2025 += days.filter(day => !isWeekend(day)).length;
+                        usedDays2025 += calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
                     });
                     
                     const total2025 = maxDays + (userData.remainingDaysFromPreviousYear || 0);
@@ -114,13 +173,12 @@ export function AdminDashboard() {
                     return bookingMonth <= month.getMonth();
                 });
                 
-                // Calculate working days used up to end of this month
+                // Calculate working days used up to end of this month (excluding holidays)
                 let usedDaysUpToMonth = 0;
                 bookingsUpToMonth.forEach(booking => {
                     const start = new Date(booking.startDate);
                     const end = new Date(booking.endDate);
-                    const days = eachDayOfInterval({ start, end });
-                    usedDaysUpToMonth += days.filter(day => !isWeekend(day)).length;
+                    usedDaysUpToMonth += calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
                 });
                 
                 // Calculate remaining days at end of this month
@@ -137,7 +195,10 @@ export function AdminDashboard() {
                     endDate: periodEnd,
                     workingDays,
                     userId: user.id,
-                    remainingDays
+                    remainingDays,
+                    isMedical,
+                    diseaseCode: isMedical ? medicalLeave.diseaseCode : undefined,
+                    totalMedicalLeaveDays: isMedical ? totalMedicalLeaveDays : undefined,
                 };
             }).filter(Boolean) as Array<{
                 firstName: string;
@@ -150,6 +211,9 @@ export function AdminDashboard() {
                 workingDays: number;
                 userId: string;
                 remainingDays: number;
+                isMedical: boolean;
+                diseaseCode?: string;
+                totalMedicalLeaveDays?: number;
             }>;
 
             // Sort by last name, then first name
@@ -171,10 +235,10 @@ export function AdminDashboard() {
     const monthlyReport = generateMonthlyReport();
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-            <div className="max-w-7xl mx-auto">
+        <div className="h-screen bg-slate-50 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col min-h-0 p-2 md:p-4">
                 {/* Header */}
-                <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+                <div className="flex flex-col md:flex-row items-center justify-between mb-2 gap-2 flex-shrink-0">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900">Panou Administrator</h1>
                         <p className="text-slate-500">
@@ -216,7 +280,7 @@ export function AdminDashboard() {
                 </div>
 
                 {/* View Toggle */}
-                <div className="mb-6 flex gap-2 flex-wrap">
+                <div className="mb-2 flex gap-2 flex-wrap flex-shrink-0">
                     <button
                         onClick={() => setView('calendar')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
@@ -304,35 +368,35 @@ export function AdminDashboard() {
                     };
 
                     return (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
+                            <div className="p-2 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
                                 <div className="flex items-center justify-between">
-                                    <h2 className="text-lg font-semibold text-slate-900">Calendar Concedii</h2>
+                                    <h2 className="text-sm font-semibold text-slate-900">Calendar Concedii</h2>
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={() => setSelectedDateForBooking(new Date())}
-                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs font-medium"
                                         >
                                             + Adaugă Rezervare
                                         </button>
                                         <button
                                             onClick={() => setCurrentDate(subMonths(currentDate, 1))}
-                                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                            className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
                                         >
-                                            <ChevronLeft className="w-5 h-5 text-slate-600" />
+                                            <ChevronLeft className="w-4 h-4 text-slate-600" />
                                         </button>
-                                        <h3 className="text-md font-medium text-slate-700 min-w-[180px] text-center capitalize">
+                                        <h3 className="text-sm font-medium text-slate-700 min-w-[150px] text-center capitalize">
                                             {format(currentDate, 'MMMM yyyy', { locale: ro })}
                                         </h3>
                                         <button
                                             onClick={() => setCurrentDate(addMonths(currentDate, 1))}
-                                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                            className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
                                         >
-                                            <ChevronRight className="w-5 h-5 text-slate-600" />
+                                            <ChevronRight className="w-4 h-4 text-slate-600" />
                                         </button>
                                         <button
                                             onClick={() => setCurrentDate(new Date())}
-                                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                                         >
                                             Astăzi
                                         </button>
@@ -341,45 +405,52 @@ export function AdminDashboard() {
                             </div>
                             
                             {/* Calendar Grid */}
-                            <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+                            <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 flex-shrink-0">
                                 {['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'].map((day) => (
-                                    <div key={day} className="p-3 text-center text-sm font-medium text-slate-500 border-r border-slate-200 last:border-r-0">
+                                    <div key={day} className="p-2 text-center text-xs font-medium text-slate-500 border-r border-slate-200 last:border-r-0">
                                         {day}
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="grid grid-cols-7 auto-rows-fr">
+                            <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto">
                                 {/* Empty cells for start of month */}
                                 {Array.from({ length: (monthStart.getDay() + 6) % 7 }).map((_, i) => (
-                                    <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100 min-h-[140px]" />
+                                    <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100" />
                                 ))}
 
                                 {days.map((day) => {
                                     const isWknd = isWeekend(day);
                                     const dayBookings = getBookingsForDate(day);
                                     const isPast = day < new Date(new Date().setHours(0, 0, 0, 0));
+                                    const isHoliday = holidayDates.has(formatDate(day));
                                     
                                     return (
                                         <div
                                             key={day.toISOString()}
                                             className={`
-                                                min-h-[140px] p-2 border-b border-r border-slate-100 relative
-                                                ${isWknd ? 'bg-slate-50/50' : 'bg-white'}
+                                                p-1.5 border-b border-r border-slate-100 relative flex flex-col
+                                                ${isHoliday ? 'bg-amber-50/80 border-amber-200' : ''}
+                                                ${isWknd ? 'bg-slate-50/50' : isHoliday ? '' : 'bg-white'}
                                                 ${isToday(day) ? 'ring-2 ring-inset ring-blue-500/50' : ''}
                                             `}
                                         >
-                                            <div className="flex justify-between items-start mb-1">
+                                            <div className="flex justify-between items-start mb-1 flex-shrink-0">
                                                 <span className={`
-                                                    text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full
-                                                    ${isToday(day) ? 'bg-blue-600 text-white' : 'text-slate-700'}
-                                                    ${isPast ? 'opacity-50' : ''}
+                                                    text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full
+                                                    ${isToday(day) ? 'bg-blue-600 text-white' : isHoliday ? 'text-amber-700 font-semibold' : 'text-slate-700'}
+                                                    ${isPast && !isHoliday ? 'opacity-50' : ''}
                                                 `}>
                                                     {format(day, 'd')}
                                                 </span>
+                                                {isHoliday && (
+                                                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">
+                                                        Zi liberă legală
+                                                    </span>
+                                                )}
                                             </div>
                                             
-                                            <div className="space-y-1 mt-1">
+                                            <div className="space-y-1 flex-1 overflow-y-auto">
                                                 {dayBookings.map((booking) => {
                                                     const user = booking.user;
                                                     if (!user) return null;
@@ -437,54 +508,90 @@ export function AdminDashboard() {
 
                 {/* All Bookings View */}
                 {view === 'all' && (
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
                             <h2 className="text-lg font-semibold text-slate-900">Toate rezervările</h2>
                         </div>
-                        <div className="p-4">
-                            {allBookings.length === 0 ? (
+                        <div className="p-4 overflow-y-auto flex-1">
+                            {allRecords.length === 0 ? (
                                 <p className="text-slate-500 text-center py-8">Nu există rezervări.</p>
                             ) : (
                                 <div className="space-y-3">
-                                    {allBookings.map((booking) => (
-                                        <div
-                                            key={booking.id}
-                                            className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200"
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className={`w-3 h-3 rounded-full ${
-                                                    booking.user?.role === 'ADMIN' ? 'bg-purple-400' 
-                                                    : booking.user?.role === 'EDUCATOR' ? 'bg-blue-500' 
-                                                    : 'bg-emerald-500'
-                                                }`} />
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{booking.user?.name}</p>
-                                                    <p className="text-sm text-slate-500">
-                                                        {booking.user?.role === 'ADMIN' ? 'Administrator' 
-                                                        : booking.user?.role === 'EDUCATOR' ? 'Educatoare' 
-                                                        : 'Auxiliar'}
-                                                    </p>
+                                    {allRecords.map((record) => {
+                                        const isMedical = record.type === 'medical';
+                                        const medicalLeave = isMedical ? record as any : null;
+                                        const booking = !isMedical ? record as any : null;
+                                        
+                                        return (
+                                            <div
+                                                key={record.id || booking?.id}
+                                                className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200"
+                                            >
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-3 h-3 rounded-full ${
+                                                        record.user?.role === 'ADMIN' ? 'bg-purple-400' 
+                                                        : record.user?.role === 'EDUCATOR' ? 'bg-blue-500' 
+                                                        : 'bg-emerald-500'
+                                                    }`} />
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">{record.user?.name}</p>
+                                                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                                                            <span>
+                                                                {record.user?.role === 'ADMIN' ? 'Administrator' 
+                                                                : record.user?.role === 'EDUCATOR' ? 'Educatoare' 
+                                                                : 'Auxiliar'}
+                                                            </span>
+                                                            {isMedical && (
+                                                                <span className="text-red-600 font-medium">
+                                                                    • CM {medicalLeave.diseaseCode}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                                                        <CalendarIcon className="w-4 h-4" />
+                                                        <span>
+                                                            {new Date(record.startDate).toLocaleDateString('ro-RO', {
+                                                                day: 'numeric',
+                                                                month: 'long',
+                                                                year: 'numeric'
+                                                            })}
+                                                            {record.startDate !== record.endDate && (
+                                                                <> - {new Date(record.endDate).toLocaleDateString('ro-RO', {
+                                                                    day: 'numeric',
+                                                                    month: 'long',
+                                                                    year: 'numeric'
+                                                                })}</>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                    {isMedical && (
+                                                        <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded font-medium">
+                                                            {medicalLeave.workingDays} zile lucrătoare
+                                                        </span>
+                                                    )}
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (confirm(`Ești sigur că vrei să ștergi ${isMedical ? 'concediul medical' : 'rezervarea'}?`)) {
+                                                                if (isMedical) {
+                                                                    await removeMedicalLeave(record.id);
+                                                                } else {
+                                                                    await removeBooking(booking.id);
+                                                                }
+                                                                window.location.reload();
+                                                            }
+                                                        }}
+                                                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        title="Șterge"
+                                                    >
+                                                        <X className="w-4 h-4" />
+                                                    </button>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                                                <CalendarIcon className="w-4 h-4" />
-                                                <span>
-                                                    {new Date(booking.startDate).toLocaleDateString('ro-RO', {
-                                                        day: 'numeric',
-                                                        month: 'long',
-                                                        year: 'numeric'
-                                                    })}
-                                                    {booking.startDate !== booking.endDate && (
-                                                        <> - {new Date(booking.endDate).toLocaleDateString('ro-RO', {
-                                                            day: 'numeric',
-                                                            month: 'long',
-                                                            year: 'numeric'
-                                                        })}</>
-                                                    )}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -493,13 +600,14 @@ export function AdminDashboard() {
 
                 {/* Monthly Report View */}
                 {view === 'report' && (
-                    <div className="space-y-6">
-                        {monthlyReport.length === 0 ? (
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-                                <p className="text-slate-500 text-center">Nu există date pentru raport.</p>
-                            </div>
-                        ) : (
-                            monthlyReport.map(({ month, monthName, entries }) => (
+                    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="overflow-y-auto flex-1 space-y-6">
+                            {monthlyReport.length === 0 ? (
+                                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                                    <p className="text-slate-500 text-center">Nu există date pentru raport.</p>
+                                </div>
+                            ) : (
+                                monthlyReport.map(({ month, monthName, entries }) => (
                                 <div key={month.toISOString()} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                                     <div className="p-4 border-b border-slate-200 bg-slate-50/50">
                                         <h2 className="text-lg font-semibold text-slate-900 capitalize">{monthName}</h2>
@@ -525,6 +633,12 @@ export function AdminDashboard() {
                                                     </th>
                                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
                                                         Zile rămase
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Tip / Cod boală
+                                                    </th>
+                                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
+                                                        Total zile CM (an)
                                                     </th>
                                                 </tr>
                                             </thead>
@@ -563,9 +677,27 @@ export function AdminDashboard() {
                                                             {entry.workingDays}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm font-medium">
-                                                            <span className={entry.remainingDays >= 0 ? 'text-emerald-600' : 'text-red-600'}>
-                                                                {entry.remainingDays}
-                                                            </span>
+                                                            {entry.isMedical ? (
+                                                                <span className="text-slate-500">-</span>
+                                                            ) : (
+                                                                <span className={entry.remainingDays >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                                                                    {entry.remainingDays}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-slate-600">
+                                                            {entry.isMedical ? (
+                                                                <span className="text-red-600 font-medium">CM {entry.diseaseCode}</span>
+                                                            ) : (
+                                                                <span className="text-blue-600 font-medium">CO</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm font-medium">
+                                                            {entry.isMedical && entry.totalMedicalLeaveDays !== undefined ? (
+                                                                <span className="text-red-600">{entry.totalMedicalLeaveDays}</span>
+                                                            ) : (
+                                                                <span className="text-slate-400">-</span>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 ))}
@@ -573,24 +705,25 @@ export function AdminDashboard() {
                                         </table>
                                     </div>
                                 </div>
-                            ))
-                        )}
+                                ))
+                            )}
+                        </div>
                     </div>
                 )}
 
                 {/* Users Management View */}
                 {view === 'users' && (
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50/50">
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
                             <h2 className="text-lg font-semibold text-slate-900">Gestionare utilizatori</h2>
                         </div>
-                        <div className="p-4">
+                        <div className="p-4 overflow-y-auto flex-1">
                             {users.length === 0 ? (
                                 <p className="text-slate-500 text-center py-8">Nu există utilizatori.</p>
                             ) : (
                                 <div className="space-y-3">
                                     {users.map((user) => {
-                                        const userRemainingDays = calculateUserAvailableDays(user, bookings);
+                                        const userRemainingDays = calculateUserAvailableDaysSync(user, bookings, holidayDates);
                                         const maxDays = user.maxVacationDays || 28;
                                         const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
                                         
@@ -733,6 +866,7 @@ export function AdminDashboard() {
                         onClose={() => setSelectedDateForBooking(null)}
                     />
                 )}
+
             </div>
         </div>
     );

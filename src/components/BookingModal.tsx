@@ -5,28 +5,35 @@ import { formatDate } from '../lib/utils';
 
 interface BookingModalProps {
     date: Date;
+    endDate?: Date;
     onClose: () => void;
 }
 
-export function BookingModal({ date, onClose }: BookingModalProps) {
+export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
     const { addBooking, bookings, users } = useStore();
     const [error, setError] = React.useState<string | null>(null);
     const [success, setSuccess] = React.useState(false);
     const [startDate, setStartDate] = React.useState<string>(formatDate(date));
-    const [endDate, setEndDate] = React.useState<string>(formatDate(date));
+    const [endDateState, setEndDateState] = React.useState<string>(endDate ? formatDate(endDate) : formatDate(date));
+
+    // Update dates when props change
+    React.useEffect(() => {
+        setStartDate(formatDate(date));
+        setEndDateState(endDate ? formatDate(endDate) : formatDate(date));
+    }, [date, endDate]);
 
     // Get existing bookings that overlap with the selected period
     const bookingsInPeriod = bookings.filter((b) => {
         const bStart = new Date(b.startDate);
         const bEnd = new Date(b.endDate);
         const selectedStart = new Date(startDate);
-        const selectedEnd = new Date(endDate);
+        const selectedEnd = new Date(endDateState);
         return !(selectedEnd < bStart || selectedStart > bEnd);
     });
     const bookedUsers = bookingsInPeriod.map(b => users.find(u => u.id === b.userId)).filter(Boolean);
 
     const handleBooking = async () => {
-        const result = await addBooking(startDate, endDate);
+        const result = await addBooking(startDate, endDateState);
         if (result.success) {
             setSuccess(true);
             setTimeout(onClose, 1500);
@@ -59,8 +66,8 @@ export function BookingModal({ date, onClose }: BookingModalProps) {
                                 value={startDate}
                                 onChange={(e) => {
                                     setStartDate(e.target.value);
-                                    if (e.target.value > endDate) {
-                                        setEndDate(e.target.value);
+                                    if (e.target.value > endDateState) {
+                                        setEndDateState(e.target.value);
                                     }
                                 }}
                                 min={formatDate(new Date())}
@@ -73,13 +80,13 @@ export function BookingModal({ date, onClose }: BookingModalProps) {
                             </label>
                             <input
                                 type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
+                                value={endDateState}
+                                onChange={(e) => setEndDateState(e.target.value)}
                                 min={startDate}
                                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             />
                         </div>
-                        {startDate === endDate ? (
+                        {startDate === endDateState ? (
                             <p className="text-sm text-slate-600">
                                 Perioadă: <span className="font-medium">{new Date(startDate).toLocaleDateString('ro-RO', {
                                     weekday: 'long',
@@ -91,7 +98,7 @@ export function BookingModal({ date, onClose }: BookingModalProps) {
                         ) : (
                             <p className="text-sm text-slate-600">
                                 Perioadă: <span className="font-medium">
-                                    {new Date(startDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })} - {new Date(endDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    {new Date(startDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })} - {new Date(endDateState).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
                                 </span>
                             </p>
                         )}

@@ -1,7 +1,8 @@
 import { supabase } from './supabase';
-import type { User, Booking } from './types';
+import type { User, Booking, MedicalLeave } from './types';
 import { hashPassword, verifyPassword } from './auth';
 import { eachDayOfInterval, isWeekend } from 'date-fns';
+import { calculateWorkingDaysExcludingHolidays, calculateWorkingDaysExcludingHolidaysSync } from './utils';
 
 // Users API
 export const usersApi = {
@@ -310,8 +311,140 @@ export const bookingsApi = {
   },
 };
 
-// Helper function to calculate user's available vacation days
-export function calculateUserAvailableDays(user: User, bookings: Booking[]): number {
+// Medical Leave API
+export const medicalLeaveApi = {
+  async getAll(): Promise<MedicalLeave[]> {
+    const { data, error } = await supabase
+      .from('medical_leave')
+      .select('*')
+      .order('start_date', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching medical leave:', error);
+      throw error;
+    }
+
+    return (data || []).map((ml: any) => ({
+      id: ml.id,
+      userId: ml.user_id,
+      startDate: ml.start_date,
+      endDate: ml.end_date,
+      diseaseCode: ml.disease_code,
+      workingDays: ml.working_days,
+      year: ml.year,
+      createdAt: ml.created_at ? new Date(ml.created_at).getTime() : Date.now(),
+    }));
+  },
+
+  async getByUserId(userId: string): Promise<MedicalLeave[]> {
+    const { data, error } = await supabase
+      .from('medical_leave')
+      .select('*')
+      .eq('user_id', userId)
+      .order('start_date', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching user medical leave:', error);
+      throw error;
+    }
+
+    return (data || []).map((ml: any) => ({
+      id: ml.id,
+      userId: ml.user_id,
+      startDate: ml.start_date,
+      endDate: ml.end_date,
+      diseaseCode: ml.disease_code,
+      workingDays: ml.working_days,
+      year: ml.year,
+      createdAt: ml.created_at ? new Date(ml.created_at).getTime() : Date.now(),
+    }));
+  },
+
+  async getByUserIdAndYear(userId: string, year: number): Promise<MedicalLeave[]> {
+    const { data, error } = await supabase
+      .from('medical_leave')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('year', year)
+      .order('start_date', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching user medical leave by year:', error);
+      throw error;
+    }
+
+    return (data || []).map((ml: any) => ({
+      id: ml.id,
+      userId: ml.user_id,
+      startDate: ml.start_date,
+      endDate: ml.end_date,
+      diseaseCode: ml.disease_code,
+      workingDays: ml.working_days,
+      year: ml.year,
+      createdAt: ml.created_at ? new Date(ml.created_at).getTime() : Date.now(),
+    }));
+  },
+
+  async create(medicalLeave: Omit<MedicalLeave, 'id' | 'createdAt'>): Promise<MedicalLeave> {
+    // Calculate working days
+    const start = new Date(medicalLeave.startDate);
+    const end = new Date(medicalLeave.endDate);
+    const workingDays = await calculateWorkingDaysExcludingHolidays(start, end);
+
+    const newMedicalLeave = {
+      id: Math.random().toString(36).substr(2, 9),
+      user_id: medicalLeave.userId,
+      start_date: medicalLeave.startDate,
+      end_date: medicalLeave.endDate,
+      disease_code: medicalLeave.diseaseCode,
+      working_days: workingDays,
+      year: medicalLeave.year,
+    };
+
+    const { data, error } = await supabase
+      .from('medical_leave')
+      .insert(newMedicalLeave)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating medical leave:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      startDate: data.start_date,
+      endDate: data.end_date,
+      diseaseCode: data.disease_code,
+      workingDays: data.working_days,
+      year: data.year,
+      createdAt: data.created_at ? new Date(data.created_at).getTime() : Date.now(),
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('medical_leave')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting medical leave:', error);
+      throw error;
+    }
+  },
+
+  // Calculate total medical leave days for a user in a specific year
+  async getTotalDaysForUserInYear(userId: string, year: number): Promise<number> {
+    const leaves = await this.getByUserIdAndYear(userId, year);
+    return leaves.reduce((total, leave) => total + leave.workingDays, 0);
+  },
+};
+
+// Helper function to calculate user's available vacation days (async version)
+export async function calculateUserAvailableDays(user: User, bookings: Booking[]): Promise<number> {
   const currentYear = new Date().getFullYear();
   const maxDays = user.maxVacationDays || 28;
   const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
@@ -334,14 +467,48 @@ export function calculateUserAvailableDays(user: User, bookings: Booking[]): num
     return bookingYear === currentYear;
   });
   
-  // Calculate working days used this year
+  // Calculate working days used this year (excluding holidays)
   let usedDays = 0;
-  currentYearBookings.forEach(booking => {
+  for (const booking of currentYearBookings) {
     const start = new Date(booking.startDate);
     const end = new Date(booking.endDate);
-    const days = eachDayOfInterval({ start, end });
-    usedDays += days.filter(day => !isWeekend(day)).length;
+    const workingDays = await calculateWorkingDaysExcludingHolidays(start, end);
+    usedDays += workingDays;
+  }
+  
+  // Total available = new year's days + remaining from previous - used this year
+  const totalAvailable = maxDays + effectiveRemainingFromPrevious;
+  return totalAvailable - usedDays;
+}
+
+// Synchronous version that uses a pre-loaded Set of holiday dates
+// Use this in components where you already have holidayDates in state
+export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], holidayDates: Set<string>): number {
+  const currentYear = new Date().getFullYear();
+  const maxDays = user.maxVacationDays || 28;
+  const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
+  const lastReset = user.lastYearReset || currentYear;
+  
+  let effectiveRemainingFromPrevious = remainingFromPrevious;
+  if (lastReset < currentYear) {
+    effectiveRemainingFromPrevious = remainingFromPrevious;
+  }
+  
+  // Calculate used days in current year
+  const currentYearBookings = bookings.filter(b => {
+    if (b.userId !== user.id) return false;
+    const bookingYear = new Date(b.startDate).getFullYear();
+    return bookingYear === currentYear;
   });
+  
+  // Calculate working days used this year (excluding holidays)
+  let usedDays = 0;
+  for (const booking of currentYearBookings) {
+    const start = new Date(booking.startDate);
+    const end = new Date(booking.endDate);
+    const workingDays = calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
+    usedDays += workingDays;
+  }
   
   // Total available = new year's days + remaining from previous - used this year
   const totalAvailable = maxDays + effectiveRemainingFromPrevious;

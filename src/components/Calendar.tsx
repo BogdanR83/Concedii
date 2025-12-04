@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     format,
     startOfMonth,
@@ -7,18 +7,41 @@ import {
     addMonths,
     subMonths,
     isWeekend,
-    isToday
+    isToday,
+    isBefore,
+    isSameDay
 } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, LogOut, User as UserIcon, Trash2, Calendar as CalendarIcon } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { BookingModal } from './BookingModal';
-import { formatDate } from '../lib/utils';
+import { formatDate, getHolidayDates } from '../lib/utils';
 
 export function Calendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+    const [startDateSelected, setStartDateSelected] = useState<Date | null>(null);
+    const [endDateSelected, setEndDateSelected] = useState<Date | null>(null);
+    const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
     const { currentUser, logout, bookings, users, removeBooking } = useStore();
+
+    // Load holidays for the current year and next year
+    useEffect(() => {
+        const loadHolidays = async () => {
+            const currentYear = currentDate.getFullYear();
+            const nextYear = currentYear + 1;
+            
+            const [currentYearHolidays, nextYearHolidays] = await Promise.all([
+                getHolidayDates(currentYear),
+                getHolidayDates(nextYear)
+            ]);
+            
+            const allHolidays = [...currentYearHolidays, ...nextYearHolidays];
+            const holidaySet = new Set(allHolidays.map(d => formatDate(d)));
+            setHolidayDates(holidaySet);
+        };
+        
+        loadHolidays();
+    }, [currentDate.getFullYear()]);
 
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
@@ -59,11 +82,94 @@ export function Calendar() {
         new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
     );
 
+    const handleDateClick = (day: Date) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dayNormalized = new Date(day);
+        dayNormalized.setHours(0, 0, 0, 0);
+
+        // If clicking on a past date, weekend, or full day, do nothing
+        if (isBefore(dayNormalized, today) || isWeekend(day)) {
+            return;
+        }
+
+        const { isFull } = getDayStatus(day);
+        if (isFull) {
+            return;
+        }
+
+        // If no start date is selected, set it
+        if (!startDateSelected) {
+            setStartDateSelected(dayNormalized);
+            setEndDateSelected(null);
+            return;
+        }
+
+        // If start date is selected
+        if (startDateSelected && !endDateSelected) {
+            // If clicking before start date, make this the new start date
+            if (isBefore(dayNormalized, startDateSelected)) {
+                setStartDateSelected(dayNormalized);
+                setEndDateSelected(null);
+                return;
+            }
+
+            // If clicking on the same day as start, just set end to same day
+            if (isSameDay(dayNormalized, startDateSelected)) {
+                setEndDateSelected(dayNormalized);
+                return;
+            }
+
+            // Otherwise, set end date
+            setEndDateSelected(dayNormalized);
+            return;
+        }
+
+        // If both dates are selected, reset and start new selection
+        if (startDateSelected && endDateSelected) {
+            setStartDateSelected(dayNormalized);
+            setEndDateSelected(null);
+        }
+    };
+
+    const isDateInRange = (day: Date) => {
+        if (!startDateSelected) return false;
+        const dayNormalized = new Date(day);
+        dayNormalized.setHours(0, 0, 0, 0);
+        
+        if (endDateSelected) {
+            const start = new Date(startDateSelected);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDateSelected);
+            end.setHours(0, 0, 0, 0);
+            return (dayNormalized >= start && dayNormalized <= end);
+        }
+        return isSameDay(dayNormalized, startDateSelected);
+    };
+
+    const isDateStart = (day: Date) => {
+        if (!startDateSelected) return false;
+        const dayNormalized = new Date(day);
+        dayNormalized.setHours(0, 0, 0, 0);
+        const start = new Date(startDateSelected);
+        start.setHours(0, 0, 0, 0);
+        return isSameDay(dayNormalized, start);
+    };
+
+    const isDateEnd = (day: Date) => {
+        if (!endDateSelected) return false;
+        const dayNormalized = new Date(day);
+        dayNormalized.setHours(0, 0, 0, 0);
+        const end = new Date(endDateSelected);
+        end.setHours(0, 0, 0, 0);
+        return isSameDay(dayNormalized, end);
+    };
+
     return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-            <div className="max-w-6xl mx-auto">
+        <div className="h-screen bg-slate-50 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col min-h-0 p-2 md:p-4">
                 {/* Header */}
-                <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+                <div className="flex flex-col md:flex-row items-center justify-between mb-2 gap-2 flex-shrink-0">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900">Planificator Concedii</h1>
                         <p className="text-slate-500">
@@ -80,82 +186,102 @@ export function Calendar() {
                 </div>
 
                 {/* Calendar Controls */}
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
+                    <div className="p-2 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 flex-shrink-0">
                         <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                             <ChevronLeft className="w-5 h-5 text-slate-600" />
                         </button>
-                        <h2 className="text-lg font-semibold text-slate-900 capitalize">
-                            {format(currentDate, 'MMMM yyyy', { locale: ro })}
-                        </h2>
+                        <div className="flex flex-col items-center">
+                            <h2 className="text-lg font-semibold text-slate-900 capitalize">
+                                {format(currentDate, 'MMMM yyyy', { locale: ro })}
+                            </h2>
+                            {startDateSelected && !endDateSelected && (
+                                <p className="text-xs text-blue-600 mt-1">
+                                    Selectează data de sfârșit
+                                </p>
+                            )}
+                        </div>
                         <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                             <ChevronRight className="w-5 h-5 text-slate-600" />
                         </button>
                     </div>
 
                     {/* Calendar Grid */}
-                    <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+                    <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 flex-shrink-0">
                         {['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'].map((day) => (
-                            <div key={day} className="p-4 text-center text-sm font-medium text-slate-500">
+                            <div key={day} className="p-2 text-center text-sm font-medium text-slate-500">
                                 {day}
                             </div>
                         ))}
                     </div>
 
-                    <div className="grid grid-cols-7 auto-rows-fr">
+                    <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto">
                         {/* Empty cells for start of month */}
                         {Array.from({ length: (monthStart.getDay() + 6) % 7 }).map((_, i) => (
-                            <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100 min-h-[120px]" />
+                            <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100" />
                         ))}
 
                         {days.map((day) => {
                             const isWknd = isWeekend(day);
-                            const { educators, auxiliaries, isFull, isMyBooking } = getDayStatus(day);
+                            const { educators, auxiliaries, isMyBooking } = getDayStatus(day);
                             const isPast = day < new Date(new Date().setHours(0, 0, 0, 0));
+                            const inRange = isDateInRange(day);
+                            const isStart = isDateStart(day);
+                            const isEnd = isDateEnd(day);
+                            const isHoliday = holidayDates.has(formatDate(day));
 
                             return (
                                 <div
                                     key={day.toISOString()}
-                                    onClick={() => !isWknd && !isPast && !isFull && setSelectedDate(day)}
+                                    onClick={() => handleDateClick(day)}
                                     className={`
-                    min-h-[120px] p-3 border-b border-r border-slate-100 relative group transition-all
-                    ${isWknd ? 'bg-slate-50/50' : 'bg-white hover:bg-blue-50/30 cursor-pointer'}
+                    p-2 border-b border-r border-slate-100 relative group transition-all flex flex-col
+                    ${isHoliday ? 'bg-amber-50/80 border-amber-200' : ''}
+                    ${isWknd ? 'bg-slate-50/50' : isHoliday ? '' : 'bg-white hover:bg-blue-50/30 cursor-pointer'}
                     ${isToday(day) ? 'ring-2 ring-inset ring-blue-500/50' : ''}
                     ${isMyBooking ? 'bg-blue-50/50' : ''}
+                    ${inRange && !isWknd && !isHoliday ? 'bg-blue-100/50' : ''}
+                    ${isStart && !isWknd && !isHoliday ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
+                    ${isEnd && !isWknd && !isHoliday ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
                   `}
                                 >
-                                    <div className="flex justify-between items-start mb-2">
+                                    <div className="flex justify-between items-start mb-1 flex-shrink-0">
                                         <span className={`
-                      text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full
-                      ${isToday(day) ? 'bg-blue-600 text-white' : 'text-slate-700'}
-                      ${isWknd ? 'text-slate-400' : ''}
+                      text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full
+                      ${isToday(day) ? 'bg-blue-600 text-white' : isHoliday ? 'text-amber-700 font-semibold' : 'text-slate-700'}
+                      ${isWknd && !isHoliday ? 'text-slate-400' : ''}
                     `}>
                                             {format(day, 'd')}
                                         </span>
-                                        {isMyBooking && (
-                                            <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
+                                        {isHoliday && (
+                                            <span className="text-[10px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">
+                                                Sărbătoare
+                                            </span>
+                                        )}
+                                        {isMyBooking && !isHoliday && (
+                                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded font-medium">
                                                 Concediul Tău
                                             </span>
                                         )}
                                     </div>
 
                                     {!isWknd && (
-                                        <div className="space-y-1.5">
+                                        <div className="space-y-1 flex-1 overflow-y-auto">
                                             {educators > 0 && (
-                                                <div className="flex items-center gap-1.5 text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded border border-purple-100">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                                                    <span>1 Educatoare</span>
+                                                <div className="flex items-center gap-1 text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                                                    <div className="w-1 h-1 rounded-full bg-purple-500 flex-shrink-0" />
+                                                    <span className="truncate">1 Educatoare</span>
                                                 </div>
                                             )}
                                             {auxiliaries > 0 && (
-                                                <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                                    <span>1 Auxiliar</span>
+                                                <div className="flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                                                    <div className="w-1 h-1 rounded-full bg-emerald-500 flex-shrink-0" />
+                                                    <span className="truncate">1 Auxiliar</span>
                                                 </div>
                                             )}
                                             {educators === 0 && auxiliaries === 0 && !isPast && (
-                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-slate-400 flex items-center gap-1">
-                                                    <UserIcon className="w-3 h-3" />
+                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-slate-400 flex items-center gap-1">
+                                                    <UserIcon className="w-2.5 h-2.5" />
                                                     <span>Liber</span>
                                                 </div>
                                             )}
@@ -169,20 +295,20 @@ export function Calendar() {
 
                 {/* My Bookings Section */}
                 {myBookings.length > 0 && (
-                    <div className="mt-8 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50/50">
-                            <h2 className="text-lg font-semibold text-slate-900">Concediile mele</h2>
+                    <div className="mt-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-shrink-0 max-h-[20vh] flex flex-col">
+                        <div className="p-2 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
+                            <h2 className="text-sm font-semibold text-slate-900">Concediile mele</h2>
                         </div>
-                        <div className="p-4">
-                            <div className="space-y-2">
+                        <div className="p-2 overflow-y-auto flex-1">
+                            <div className="space-y-1">
                                 {myBookings.map((booking) => (
                                     <div
                                         key={booking.id}
-                                        className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                                        className="flex items-center justify-between p-2 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
                                     >
-                                        <div className="flex items-center gap-3">
-                                            <CalendarIcon className="w-4 h-4 text-blue-600" />
-                                            <span className="text-sm text-slate-700">
+                                        <div className="flex items-center gap-2">
+                                            <CalendarIcon className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                                            <span className="text-xs text-slate-700">
                                                 {new Date(booking.startDate).toLocaleDateString('ro-RO', {
                                                     day: 'numeric',
                                                     month: 'long',
@@ -203,10 +329,10 @@ export function Calendar() {
                                                     await removeBooking(booking.id);
                                                 }
                                             }}
-                                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
                                             title="Anulează concediul"
                                         >
-                                            <Trash2 className="w-4 h-4" />
+                                            <Trash2 className="w-3 h-3" />
                                         </button>
                                     </div>
                                 ))}
@@ -216,10 +342,14 @@ export function Calendar() {
                 )}
             </div>
 
-            {selectedDate && (
+            {startDateSelected && endDateSelected && (
                 <BookingModal
-                    date={selectedDate}
-                    onClose={() => setSelectedDate(null)}
+                    date={startDateSelected}
+                    endDate={endDateSelected}
+                    onClose={() => {
+                        setStartDateSelected(null);
+                        setEndDateSelected(null);
+                    }}
                 />
             )}
         </div>
