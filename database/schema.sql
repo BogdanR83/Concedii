@@ -56,6 +56,14 @@ BEGIN
     ) THEN
         ALTER TABLE users ADD COLUMN last_year_reset INTEGER DEFAULT EXTRACT(YEAR FROM NOW());
     END IF;
+
+    -- Add active column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'users' AND column_name = 'active'
+    ) THEN
+        ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT true;
+    END IF;
 END $$;
 
 -- Create index for username lookup (only if username column exists)

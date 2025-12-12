@@ -11,6 +11,7 @@ export type User = {
     maxVacationDays?: number;
     remainingDaysFromPreviousYear?: number;
     lastYearReset?: number;
+    active?: boolean;
 };
 
 // Booking type
@@ -50,4 +51,6 @@ export type BookingState = {
     removeBooking: (bookingId: string) => Promise<void>;
     addMedicalLeave: (userId: string, startDate: string, endDate: string, diseaseCode: string) => Promise<{ success: boolean; error?: string }>;
     removeMedicalLeave: (medicalLeaveId: string) => Promise<void>;
+    createUser: (name: string, role: Role, username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+    toggleUserActive: (userId: string) => Promise<{ success: boolean; error?: string }>;
 };

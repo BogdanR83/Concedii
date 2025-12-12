@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X, UserPlus, UserMinus } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { calculateUserAvailableDaysSync, usersApi } from '../lib/api';
 import { AdminBookingModal } from './AdminBookingModal';
+import { AddUserModal } from './AddUserModal';
 import { formatDate, getHolidayDates, calculateWorkingDaysExcludingHolidaysSync } from '../lib/utils';
 
 export function AdminDashboard() {
-    const { currentUser, logout, bookings, medicalLeaves, users, setUserMaxVacationDays, resetUserPassword, removeBooking, removeMedicalLeave } = useStore();
+    const { currentUser, logout, bookings, medicalLeaves, users, setUserMaxVacationDays, resetUserPassword, removeBooking, removeMedicalLeave, createUser, toggleUserActive } = useStore();
     const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar'>('calendar');
     const [resettingPassword, setResettingPassword] = useState<string | null>(null);
     const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
@@ -17,6 +18,7 @@ export function AdminDashboard() {
     const [resettingYearly, setResettingYearly] = useState(false);
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDateForBooking, setSelectedDateForBooking] = useState<Date | null>(null);
+    const [showAddUserModal, setShowAddUserModal] = useState(false);
 
     // Load holidays for the current year and next year
     useEffect(() => {
@@ -714,8 +716,15 @@ export function AdminDashboard() {
                 {/* Users Management View */}
                 {view === 'users' && (
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0 flex items-center justify-between">
                             <h2 className="text-lg font-semibold text-slate-900">Gestionare utilizatori</h2>
+                            <button
+                                onClick={() => setShowAddUserModal(true)}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2"
+                            >
+                                <UserPlus className="w-4 h-4" />
+                                Adaugă utilizator
+                            </button>
                         </div>
                         <div className="p-4 overflow-y-auto flex-1">
                             {users.length === 0 ? (
@@ -741,7 +750,16 @@ export function AdminDashboard() {
                                                             : 'bg-slate-500'
                                                         }`} />
                                                         <div>
-                                                            <p className="font-medium text-slate-900">{user.name}</p>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className={`font-medium ${user.active === false ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+                                                                    {user.name}
+                                                                </p>
+                                                                {user.active === false && (
+                                                                    <span className="text-xs bg-slate-300 text-slate-700 px-2 py-0.5 rounded">
+                                                                        Inactiv
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <div className="flex items-center gap-3 text-sm text-slate-500">
                                                                 <span>
                                                                     {user.role === 'ADMIN' ? 'Administrator' 
@@ -756,6 +774,32 @@ export function AdminDashboard() {
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const result = await toggleUserActive(user.id);
+                                                            if (!result.success) {
+                                                                alert(result.error || 'Eroare la actualizarea statusului');
+                                                            }
+                                                        }}
+                                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 ${
+                                                            user.active === false
+                                                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                                                : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                                        }`}
+                                                        title={user.active === false ? 'Activează utilizatorul' : 'Inactivează utilizatorul'}
+                                                    >
+                                                        {user.active === false ? (
+                                                            <>
+                                                                <UserPlus className="w-4 h-4" />
+                                                                Activează
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <UserMinus className="w-4 h-4" />
+                                                                Inactivează
+                                                            </>
+                                                        )}
+                                                    </button>
                                                 </div>
                                                 
                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-sm">
@@ -868,6 +912,17 @@ export function AdminDashboard() {
                 )}
 
             </div>
+
+            {/* Add User Modal */}
+            {showAddUserModal && (
+                <AddUserModal
+                    onClose={() => setShowAddUserModal(false)}
+                    onCreate={async (name, role, username, password) => {
+                        const result = await createUser(name, role, username, password);
+                        return result;
+                    }}
+                />
+            )}
         </div>
     );
 }

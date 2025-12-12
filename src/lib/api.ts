@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { User, Booking, MedicalLeave } from './types';
+import type { User, Booking, MedicalLeave, Role } from './types';
 import { hashPassword, verifyPassword } from './auth';
 import { eachDayOfInterval, isWeekend } from 'date-fns';
 import { calculateWorkingDaysExcludingHolidays, calculateWorkingDaysExcludingHolidaysSync } from './utils';
@@ -9,7 +9,7 @@ export const usersApi = {
   async getAll(): Promise<User[]> {
     const { data, error } = await supabase
       .from('users')
-      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset')
+      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset, active')
       .order('role', { ascending: false })
       .order('name');
 
@@ -27,6 +27,7 @@ export const usersApi = {
       maxVacationDays: u.max_vacation_days || 28,
       remainingDaysFromPreviousYear: u.remaining_days_from_previous_year || 0,
       lastYearReset: u.last_year_reset || new Date().getFullYear(),
+      active: u.active !== undefined ? u.active : true, // Default to true for existing users
     }));
   },
 
@@ -198,19 +199,95 @@ export const usersApi = {
     }
   },
 
-  async create(user: User): Promise<User> {
-    const { data, error } = await supabase
-      .from('users')
-      .insert(user)
-      .select()
-      .single();
+  async create(userData: { name: string; role: Role; username: string; password: string }): Promise<{ success: boolean; error?: string; user?: User }> {
+    try {
+      // Check if username already exists
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', userData.username)
+        .single();
 
-    if (error) {
-      console.error('Error creating user:', error);
-      throw error;
+      if (existingUser) {
+        return { success: false, error: 'Username-ul există deja' };
+      }
+
+      // Generate ID if not provided
+      const userId = `${userData.role.toLowerCase()}-${Date.now()}`;
+      
+      // Hash password
+      const passwordHash = hashPassword(userData.password);
+
+      // Insert user
+      const { data, error } = await supabase
+        .from('users')
+        .insert({
+          id: userId,
+          name: userData.name,
+          role: userData.role,
+          username: userData.username,
+          password_hash: passwordHash,
+          must_change_password: true,
+          max_vacation_days: 28,
+          remaining_days_from_previous_year: 0,
+          last_year_reset: new Date().getFullYear(),
+          active: true,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating user:', error);
+        return { success: false, error: error.message };
+      }
+
+      return {
+        success: true,
+        user: {
+          id: data.id,
+          name: data.name,
+          role: data.role,
+          username: data.username,
+          mustChangePassword: data.must_change_password,
+          maxVacationDays: data.max_vacation_days || 28,
+          remainingDaysFromPreviousYear: data.remaining_days_from_previous_year || 0,
+          lastYearReset: data.last_year_reset || new Date().getFullYear(),
+          active: data.active !== undefined ? data.active : true,
+        },
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Eroare la crearea utilizatorului' };
     }
+  },
 
-    return data;
+  async toggleActive(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Get current active status
+      const { data: user, error: fetchError } = await supabase
+        .from('users')
+        .select('active')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError || !user) {
+        return { success: false, error: 'Utilizatorul nu a fost găsit' };
+      }
+
+      // Toggle active status
+      const { error } = await supabase
+        .from('users')
+        .update({ active: !user.active })
+        .eq('id', userId);
+
+      if (error) {
+        console.error('Error toggling user active status:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Eroare la actualizarea statusului' };
+    }
   },
 
   async bulkCreate(users: User[]): Promise<void> {
