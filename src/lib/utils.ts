@@ -375,8 +375,9 @@ export function getJanuary3to5(year: number): { start: Date; end: Date } {
  * - Last week of December
  * - January 3-5
  * - Last week of August
+ * - Closed periods (when kindergarten is closed)
  */
-export function isDateInSpecialPeriod(date: Date): boolean {
+export function isDateInSpecialPeriod(date: Date, closedPeriods?: Array<{ startDate: string; endDate: string }>): boolean {
     const year = date.getFullYear();
     const dateStr = formatDate(date);
     
@@ -404,13 +405,47 @@ export function isDateInSpecialPeriod(date: Date): boolean {
         return true;
     }
     
+    // Check closed periods if provided
+    if (closedPeriods && closedPeriods.length > 0) {
+        if (isDateInClosedPeriod(date, closedPeriods)) {
+            return true;
+        }
+    }
+    
     return false;
 }
 
 /**
- * Checks if a date range overlaps with any special period (where everyone can take vacation)
+ * Checks if a date is in a closed period (when kindergarten is closed)
  */
-export function isDateRangeInSpecialPeriod(startDate: string, endDate: string): boolean {
+export function isDateInClosedPeriod(date: Date, closedPeriods: Array<{ startDate: string; endDate: string }>): boolean {
+    const dateStr = formatDate(date);
+    return closedPeriods.some(period => {
+        return dateStr >= period.startDate && dateStr <= period.endDate;
+    });
+}
+
+/**
+ * Checks if a date range overlaps with any closed period (when kindergarten is closed)
+ */
+export function isDateRangeInClosedPeriod(startDate: string, endDate: string, closedPeriods: Array<{ startDate: string; endDate: string }>): boolean {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const startStr = formatDate(start);
+    const endStr = formatDate(end);
+    
+    return closedPeriods.some(period => {
+        // Check if ranges overlap
+        return !(endStr < period.startDate || startStr > period.endDate);
+    });
+}
+
+/**
+ * Checks if a date range overlaps with any special period (where everyone can take vacation)
+ * This includes hardcoded periods (last week of August, last week of December, Jan 3-5)
+ * and closed periods from the database
+ */
+export function isDateRangeInSpecialPeriod(startDate: string, endDate: string, closedPeriods?: Array<{ startDate: string; endDate: string }>): boolean {
     const start = new Date(startDate);
     const end = new Date(endDate);
     
@@ -445,6 +480,13 @@ export function isDateRangeInSpecialPeriod(startDate: string, endDate: string): 
         const lastWeekAugEndStr = formatDate(lastWeekAugust.end);
         
         if (!(endStr < lastWeekAugStartStr || startStr > lastWeekAugEndStr)) {
+            return true;
+        }
+    }
+    
+    // Check closed periods if provided
+    if (closedPeriods && closedPeriods.length > 0) {
+        if (isDateRangeInClosedPeriod(startDate, endDate, closedPeriods)) {
             return true;
         }
     }

@@ -46,11 +46,12 @@ export function AddUserModal({ onClose, onCreate }: AddUserModalProps) {
             setError('Numele este obligatoriu');
             return;
         }
-        if (!username.trim()) {
+        const trimmedUsername = username.trim();
+        if (!trimmedUsername) {
             setError('Username-ul este obligatoriu');
             return;
         }
-        if (username.length < 3) {
+        if (trimmedUsername.length < 3) {
             setError('Username-ul trebuie să aibă minim 3 caractere');
             return;
         }
@@ -138,7 +139,7 @@ export function AddUserModal({ onClose, onCreate }: AddUserModalProps) {
                                 Parolă inițială: *
                             </label>
                             <input
-                                type="text"
+                                type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="12345"

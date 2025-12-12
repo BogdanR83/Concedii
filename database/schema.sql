@@ -119,8 +119,22 @@ CREATE INDEX IF NOT EXISTS idx_medical_leave_dates ON medical_leave(start_date, 
 CREATE INDEX IF NOT EXISTS idx_medical_leave_year ON medical_leave(year);
 CREATE INDEX IF NOT EXISTS idx_medical_leave_user_year ON medical_leave(user_id, year);
 
+-- Create closed_periods table for tracking when kindergarten is closed
+CREATE TABLE IF NOT EXISTS closed_periods (
+    id TEXT PRIMARY KEY,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    description TEXT,
+    created_at BIGINT NOT NULL,
+    CONSTRAINT valid_date_range CHECK (end_date >= start_date)
+);
+
+-- Create indexes for closed_periods
+CREATE INDEX IF NOT EXISTS idx_closed_periods_dates ON closed_periods(start_date, end_date);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE medical_leave ENABLE ROW LEVEL SECURITY;
+ALTER TABLE closed_periods ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies: Allow all operations for authenticated users
 -- In production, you should create more restrictive policies
@@ -128,6 +142,7 @@ ALTER TABLE medical_leave ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON users;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON bookings;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON medical_leave;
+DROP POLICY IF EXISTS "Allow all for authenticated users" ON closed_periods;
 
 CREATE POLICY "Allow all for authenticated users" ON users
     FOR ALL USING (true);
@@ -136,5 +151,8 @@ CREATE POLICY "Allow all for authenticated users" ON bookings
     FOR ALL USING (true);
 
 CREATE POLICY "Allow all for authenticated users" ON medical_leave
+    FOR ALL USING (true);
+
+CREATE POLICY "Allow all for authenticated users" ON closed_periods
     FOR ALL USING (true);
 
