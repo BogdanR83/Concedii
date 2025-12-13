@@ -105,14 +105,9 @@ export function Calendar() {
         dayNormalized.setHours(0, 0, 0, 0);
         const dayYear = dayNormalized.getFullYear();
 
-<<<<<<< HEAD
         // Allow dates from 2025 or earlier (including past dates)
         // Block dates from 2026 onwards
         if (dayYear > 2025 || isWeekend(day)) {
-=======
-        // If clicking on a past date, weekend, full day, or closed period, do nothing
-        if (isBefore(dayNormalized, today) || isWeekend(day)) {
->>>>>>> 79f0aeedaea0c3849c71f1a41ca33babd80e45f7
             return;
         }
 
