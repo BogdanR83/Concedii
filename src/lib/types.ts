@@ -11,6 +11,7 @@ export type User = {
     maxVacationDays?: number;
     remainingDaysFromPreviousYear?: number;
     lastYearReset?: number;
+    active?: boolean;
 };
 
 // Booking type
@@ -34,12 +35,22 @@ export type MedicalLeave = {
     createdAt: number;
 };
 
+// Closed Period type (when kindergarten is closed and everyone is on vacation)
+export type ClosedPeriod = {
+    id: string;
+    startDate: string;
+    endDate: string;
+    description?: string;
+    createdAt: number;
+};
+
 // BookingState type
 export type BookingState = {
     currentUser: User | null;
     users: User[];
     bookings: Booking[];
     medicalLeaves: MedicalLeave[];
+    closedPeriods: ClosedPeriod[];
     login: (username: string, password: string) => Promise<{ success: boolean; error?: string; mustChangePassword?: boolean }>;
     logout: () => void;
     changePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
@@ -50,4 +61,8 @@ export type BookingState = {
     removeBooking: (bookingId: string) => Promise<void>;
     addMedicalLeave: (userId: string, startDate: string, endDate: string, diseaseCode: string) => Promise<{ success: boolean; error?: string }>;
     removeMedicalLeave: (medicalLeaveId: string) => Promise<void>;
+    createUser: (name: string, role: Role, username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+    toggleUserActive: (userId: string) => Promise<{ success: boolean; error?: string }>;
+    addClosedPeriod: (startDate: string, endDate: string, description?: string) => Promise<{ success: boolean; error?: string }>;
+    removeClosedPeriod: (closedPeriodId: string) => Promise<void>;
 };

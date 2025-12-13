@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { User, Booking, MedicalLeave } from './types';
+import type { User, Booking, MedicalLeave, ClosedPeriod, Role } from './types';
 import { hashPassword, verifyPassword } from './auth';
 import { eachDayOfInterval, isWeekend } from 'date-fns';
 import { calculateWorkingDaysExcludingHolidays, calculateWorkingDaysExcludingHolidaysSync } from './utils';
@@ -9,7 +9,7 @@ export const usersApi = {
   async getAll(): Promise<User[]> {
     const { data, error } = await supabase
       .from('users')
-      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset')
+      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset, active')
       .order('role', { ascending: false })
       .order('name');
 
@@ -27,6 +27,7 @@ export const usersApi = {
       maxVacationDays: u.max_vacation_days || 28,
       remainingDaysFromPreviousYear: u.remaining_days_from_previous_year || 0,
       lastYearReset: u.last_year_reset || new Date().getFullYear(),
+      active: u.active ?? true, // Default to true for existing users (handles both null and undefined)
     }));
   },
 
@@ -38,6 +39,11 @@ export const usersApi = {
       .single();
 
     if (error || !data) {
+      return { user: null, mustChangePassword: false };
+    }
+
+    // Check if user is active
+    if (data.active === false) {
       return { user: null, mustChangePassword: false };
     }
 
@@ -56,6 +62,7 @@ export const usersApi = {
         maxVacationDays: data.max_vacation_days || 28,
         remainingDaysFromPreviousYear: data.remaining_days_from_previous_year || 0,
         lastYearReset: data.last_year_reset || new Date().getFullYear(),
+        active: data.active ?? true, // Default to true for existing users (handles both null and undefined)
       },
       mustChangePassword: data.must_change_password,
     };
@@ -107,7 +114,7 @@ export const usersApi = {
   async getById(id: string): Promise<User | null> {
     const { data, error } = await supabase
       .from('users')
-      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset')
+      .select('id, name, role, username, must_change_password, max_vacation_days, remaining_days_from_previous_year, last_year_reset, active')
       .eq('id', id)
       .single();
 
@@ -125,6 +132,7 @@ export const usersApi = {
       maxVacationDays: data.max_vacation_days || 28,
       remainingDaysFromPreviousYear: data.remaining_days_from_previous_year || 0,
       lastYearReset: data.last_year_reset || new Date().getFullYear(),
+      active: data.active ?? true, // Default to true for existing users (handles both null and undefined)
     };
   },
 
@@ -155,6 +163,9 @@ export const usersApi = {
 
     // Get all bookings to calculate used days
     const allBookings = await bookingsApi.getAll();
+    
+    // Get all closed periods
+    const allClosedPeriods = await closedPeriodsApi.getAll();
 
     // Update each user if needed
     for (const user of users || []) {
@@ -174,6 +185,33 @@ export const usersApi = {
           const days = eachDayOfInterval({ start, end });
           usedDaysPreviousYear += days.filter(day => !isWeekend(day)).length;
         });
+        
+        // Add closed periods from previous year (everyone is on vacation during closed periods)
+        if (allClosedPeriods && allClosedPeriods.length > 0) {
+          for (const period of allClosedPeriods) {
+            const periodStart = new Date(period.startDate);
+            const periodEnd = new Date(period.endDate);
+            const periodStartYear = periodStart.getFullYear();
+            const periodEndYear = periodEnd.getFullYear();
+            
+            // Check if period overlaps with previous year
+            if (periodStartYear <= previousYear && periodEndYear >= previousYear) {
+              // Calculate working days for the part of the period that's in previous year
+              let actualStart = periodStart;
+              let actualEnd = periodEnd;
+              
+              if (periodStartYear < previousYear) {
+                actualStart = new Date(previousYear, 0, 1); // January 1 of previous year
+              }
+              if (periodEndYear > previousYear) {
+                actualEnd = new Date(previousYear, 11, 31); // December 31 of previous year
+              }
+              
+              const days = eachDayOfInterval({ start: actualStart, end: actualEnd });
+              usedDaysPreviousYear += days.filter(day => !isWeekend(day)).length;
+            }
+          }
+        }
         
         // Calculate remaining from previous year
         // Total available previous year = max days + remaining from year before that
@@ -198,19 +236,108 @@ export const usersApi = {
     }
   },
 
-  async create(user: User): Promise<User> {
-    const { data, error } = await supabase
-      .from('users')
-      .insert(user)
-      .select()
-      .single();
+  async create(userData: { name: string; role: Role; username: string; password: string }): Promise<{ success: boolean; error?: string; user?: User }> {
+    try {
+      // Check if username already exists
+      const { data: existingUser, error: checkError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', userData.username)
+        .single();
 
-    if (error) {
-      console.error('Error creating user:', error);
-      throw error;
+      // Handle errors from the username check
+      if (checkError) {
+        // PGRST116 is the Supabase error code for "no rows found" (expected case)
+        // If it's a different error, it's a real database error that should be reported
+        if (checkError.code !== 'PGRST116') {
+          console.error('Error checking username existence:', checkError);
+          return { success: false, error: 'Eroare la verificarea username-ului' };
+        }
+        // If error is PGRST116 (no rows found), that's expected - username is available
+        // Continue to create the user
+      } else if (existingUser) {
+        // No error and data exists means username is already taken
+        return { success: false, error: 'Username-ul există deja' };
+      }
+
+      // Generate ID if not provided
+      const userId = `${userData.role.toLowerCase()}-${Date.now()}`;
+      
+      // Hash password
+      const passwordHash = hashPassword(userData.password);
+
+      // Insert user
+      const { data, error } = await supabase
+        .from('users')
+        .insert({
+          id: userId,
+          name: userData.name,
+          role: userData.role,
+          username: userData.username,
+          password_hash: passwordHash,
+          must_change_password: true,
+          max_vacation_days: 28,
+          remaining_days_from_previous_year: 0,
+          last_year_reset: new Date().getFullYear(),
+          active: true,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating user:', error);
+        return { success: false, error: error.message };
+      }
+
+      return {
+        success: true,
+        user: {
+          id: data.id,
+          name: data.name,
+          role: data.role,
+          username: data.username,
+          mustChangePassword: data.must_change_password,
+          maxVacationDays: data.max_vacation_days || 28,
+          remainingDaysFromPreviousYear: data.remaining_days_from_previous_year || 0,
+          lastYearReset: data.last_year_reset || new Date().getFullYear(),
+          active: data.active ?? true, // Default to true for existing users (handles both null and undefined)
+        },
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Eroare la crearea utilizatorului' };
     }
+  },
 
-    return data;
+  async toggleActive(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Get current active status
+      const { data: user, error: fetchError } = await supabase
+        .from('users')
+        .select('active')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError || !user) {
+        return { success: false, error: 'Utilizatorul nu a fost găsit' };
+      }
+
+      // Toggle active status
+      // Explicitly check for true to handle null/undefined cases properly
+      const newActiveStatus = user.active === true ? false : true;
+      const { error } = await supabase
+        .from('users')
+        .update({ active: newActiveStatus })
+        .eq('id', userId);
+
+      if (error) {
+        console.error('Error toggling user active status:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Eroare la actualizarea statusului' };
+    }
   },
 
   async bulkCreate(users: User[]): Promise<void> {
@@ -443,8 +570,72 @@ export const medicalLeaveApi = {
   },
 };
 
+// Closed Periods API
+export const closedPeriodsApi = {
+  async getAll(): Promise<ClosedPeriod[]> {
+    const { data, error } = await supabase
+      .from('closed_periods')
+      .select('*')
+      .order('start_date', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching closed periods:', error);
+      return [];
+    }
+
+    return (data || []).map((cp: any) => ({
+      id: cp.id,
+      startDate: cp.start_date,
+      endDate: cp.end_date,
+      description: cp.description || undefined,
+      createdAt: cp.created_at,
+    }));
+  },
+
+  async create(period: Omit<ClosedPeriod, 'id' | 'createdAt'>): Promise<ClosedPeriod> {
+    const newPeriod = {
+      id: Math.random().toString(36).substr(2, 9),
+      start_date: period.startDate,
+      end_date: period.endDate,
+      description: period.description || null,
+      created_at: Date.now(),
+    };
+
+    const { data, error } = await supabase
+      .from('closed_periods')
+      .insert(newPeriod)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating closed period:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      startDate: data.start_date,
+      endDate: data.end_date,
+      description: data.description || undefined,
+      createdAt: data.created_at,
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('closed_periods')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting closed period:', error);
+      throw error;
+    }
+  },
+};
+
 // Helper function to calculate user's available vacation days (async version)
-export async function calculateUserAvailableDays(user: User, bookings: Booking[]): Promise<number> {
+export async function calculateUserAvailableDays(user: User, bookings: Booking[], closedPeriods?: ClosedPeriod[]): Promise<number> {
   const currentYear = new Date().getFullYear();
   const maxDays = user.maxVacationDays || 28;
   const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
@@ -460,7 +651,7 @@ export async function calculateUserAvailableDays(user: User, bookings: Booking[]
     effectiveRemainingFromPrevious = remainingFromPrevious;
   }
   
-  // Calculate used days in current year
+  // Calculate used days in current year from bookings
   const currentYearBookings = bookings.filter(b => {
     if (b.userId !== user.id) return false;
     const bookingYear = new Date(b.startDate).getFullYear();
@@ -476,6 +667,36 @@ export async function calculateUserAvailableDays(user: User, bookings: Booking[]
     usedDays += workingDays;
   }
   
+  // Add days from closed periods in current year (everyone is on vacation during closed periods)
+  if (closedPeriods && closedPeriods.length > 0) {
+    for (const period of closedPeriods) {
+      const periodStart = new Date(period.startDate);
+      const periodEnd = new Date(period.endDate);
+      const periodYear = periodStart.getFullYear();
+      
+      // Only count closed periods from current year
+      if (periodYear === currentYear) {
+        // Check if period overlaps with current year
+        const periodStartYear = periodStart.getFullYear();
+        const periodEndYear = periodEnd.getFullYear();
+        
+        // Calculate working days for the part of the period that's in current year
+        let actualStart = periodStart;
+        let actualEnd = periodEnd;
+        
+        if (periodStartYear < currentYear) {
+          actualStart = new Date(currentYear, 0, 1); // January 1 of current year
+        }
+        if (periodEndYear > currentYear) {
+          actualEnd = new Date(currentYear, 11, 31); // December 31 of current year
+        }
+        
+        const closedPeriodDays = await calculateWorkingDaysExcludingHolidays(actualStart, actualEnd);
+        usedDays += closedPeriodDays;
+      }
+    }
+  }
+  
   // Total available = new year's days + remaining from previous - used this year
   const totalAvailable = maxDays + effectiveRemainingFromPrevious;
   return totalAvailable - usedDays;
@@ -483,7 +704,7 @@ export async function calculateUserAvailableDays(user: User, bookings: Booking[]
 
 // Synchronous version that uses a pre-loaded Set of holiday dates
 // Use this in components where you already have holidayDates in state
-export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], holidayDates: Set<string>): number {
+export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], holidayDates: Set<string>, closedPeriods?: ClosedPeriod[]): number {
   const currentYear = new Date().getFullYear();
   const maxDays = user.maxVacationDays || 28;
   const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
@@ -494,7 +715,7 @@ export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], 
     effectiveRemainingFromPrevious = remainingFromPrevious;
   }
   
-  // Calculate used days in current year
+  // Calculate used days in current year from bookings
   const currentYearBookings = bookings.filter(b => {
     if (b.userId !== user.id) return false;
     const bookingYear = new Date(b.startDate).getFullYear();
@@ -508,6 +729,36 @@ export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], 
     const end = new Date(booking.endDate);
     const workingDays = calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
     usedDays += workingDays;
+  }
+  
+  // Add days from closed periods in current year (everyone is on vacation during closed periods)
+  if (closedPeriods && closedPeriods.length > 0) {
+    for (const period of closedPeriods) {
+      const periodStart = new Date(period.startDate);
+      const periodEnd = new Date(period.endDate);
+      const periodYear = periodStart.getFullYear();
+      
+      // Only count closed periods from current year
+      if (periodYear === currentYear) {
+        // Check if period overlaps with current year
+        const periodStartYear = periodStart.getFullYear();
+        const periodEndYear = periodEnd.getFullYear();
+        
+        // Calculate working days for the part of the period that's in current year
+        let actualStart = periodStart;
+        let actualEnd = periodEnd;
+        
+        if (periodStartYear < currentYear) {
+          actualStart = new Date(currentYear, 0, 1); // January 1 of current year
+        }
+        if (periodEndYear > currentYear) {
+          actualEnd = new Date(currentYear, 11, 31); // December 31 of current year
+        }
+        
+        const closedPeriodDays = calculateWorkingDaysExcludingHolidaysSync(actualStart, actualEnd, holidayDates);
+        usedDays += closedPeriodDays;
+      }
+    }
   }
   
   // Total available = new year's days + remaining from previous - used this year

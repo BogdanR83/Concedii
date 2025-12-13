@@ -9,13 +9,14 @@ import {
     isWeekend,
     isToday,
     isBefore,
-    isSameDay
+    isSameDay,
+    getDay
 } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, LogOut, User as UserIcon, Trash2, Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { BookingModal } from './BookingModal';
-import { formatDate, getHolidayDates } from '../lib/utils';
+import { formatDate, getHolidayDates, isDateInClosedPeriod } from '../lib/utils';
 
 export function Calendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -23,7 +24,7 @@ export function Calendar() {
     const [endDateSelected, setEndDateSelected] = useState<Date | null>(null);
     const [showBookingModal, setShowBookingModal] = useState(false);
     const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
-    const { currentUser, logout, bookings, users, removeBooking } = useStore();
+    const { currentUser, logout, bookings, users, closedPeriods, removeBooking } = useStore();
 
     // Load holidays for the current year and next year
     useEffect(() => {
@@ -62,17 +63,31 @@ export function Calendar() {
             return dateObj >= bStart && dateObj <= bEnd;
         });
 
-        const educators = bookingsOnDate.filter(b => {
+        // Exclude current user's own bookings when checking availability
+        const otherBookingsOnDate = bookingsOnDate.filter(b => b.userId !== currentUser?.id);
+
+        const educators = otherBookingsOnDate.filter(b => {
             const u = users.find(user => user.id === b.userId);
             return u?.role === 'EDUCATOR';
         }).length;
 
-        const auxiliaries = bookingsOnDate.filter(b => {
+        const auxiliaries = otherBookingsOnDate.filter(b => {
             const u = users.find(user => user.id === b.userId);
             return u?.role === 'AUXILIARY';
         }).length;
 
-        const isFull = educators >= 1 && auxiliaries >= 1;
+        // Day is full if the current user's role-specific limit is reached
+        // Educators can't book if another educator is already booked
+        // Auxiliaries can't book if another auxiliary is already booked
+        // Admins have no restrictions (isFull is always false for them)
+        let isFull = false;
+        if (currentUser?.role === 'EDUCATOR') {
+            isFull = educators >= 1;
+        } else if (currentUser?.role === 'AUXILIARY') {
+            isFull = auxiliaries >= 1;
+        }
+        // For ADMIN, isFull remains false (no restrictions)
+
         const isMyBooking = bookingsOnDate.some(b => b.userId === currentUser?.id);
 
         return { educators, auxiliaries, isFull, isMyBooking };
@@ -90,10 +105,20 @@ export function Calendar() {
         dayNormalized.setHours(0, 0, 0, 0);
         const dayYear = dayNormalized.getFullYear();
 
+<<<<<<< HEAD
         // Allow dates from 2025 or earlier (including past dates)
         // Block dates from 2026 onwards
         if (dayYear > 2025 || isWeekend(day)) {
+=======
+        // If clicking on a past date, weekend, full day, or closed period, do nothing
+        if (isBefore(dayNormalized, today) || isWeekend(day)) {
+>>>>>>> 79f0aeedaea0c3849c71f1a41ca33babd80e45f7
             return;
+        }
+
+        // Check if day is in a closed period (kindergarten is closed, everyone is on vacation)
+        if (closedPeriods && closedPeriods.length > 0 && isDateInClosedPeriod(day, closedPeriods)) {
+            return; // Cannot book during closed periods
         }
 
         const { isFull } = getDayStatus(day);
@@ -224,8 +249,8 @@ export function Calendar() {
                     </div>
 
                     <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto">
-                        {/* Empty cells for start of month */}
-                        {Array.from({ length: (monthStart.getDay() + 6) % 7 }).map((_, i) => (
+                        {/* Empty cells for start of month - week starts on Monday (1) */}
+                        {Array.from({ length: (getDay(monthStart) + 6) % 7 }).map((_, i) => (
                             <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100" />
                         ))}
 
@@ -237,6 +262,7 @@ export function Calendar() {
                             const isStart = isDateStart(day);
                             const isEnd = isDateEnd(day);
                             const isHoliday = holidayDates.has(formatDate(day));
+                            const isClosed = closedPeriods && closedPeriods.length > 0 && isDateInClosedPeriod(day, closedPeriods);
 
                             return (
                                 <div
@@ -244,29 +270,35 @@ export function Calendar() {
                                     onClick={() => handleDateClick(day)}
                                     className={`
                     p-2 border-b border-r border-slate-100 relative group transition-all flex flex-col
-                    ${isHoliday ? 'bg-amber-50/80 border-amber-200' : ''}
-                    ${isWknd ? 'bg-slate-50/50' : isHoliday ? '' : 'bg-white hover:bg-blue-50/30 cursor-pointer'}
-                    ${isToday(day) ? 'ring-2 ring-inset ring-blue-500/50' : ''}
-                    ${isMyBooking ? 'bg-blue-50/50' : ''}
-                    ${inRange && !isWknd && !isHoliday ? 'bg-blue-100/50' : ''}
-                    ${isStart && !isWknd && !isHoliday ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
-                    ${isEnd && !isWknd && !isHoliday ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
+                    ${isClosed ? 'bg-slate-200/60 border-slate-300' : ''}
+                    ${isHoliday && !isClosed ? 'bg-amber-50/80 border-amber-200' : ''}
+                    ${isWknd ? 'bg-slate-50/50' : isHoliday || isClosed ? '' : 'bg-white hover:bg-blue-50/30 cursor-pointer'}
+                    ${isClosed ? '' : isToday(day) ? 'ring-2 ring-inset ring-blue-500/50' : ''}
+                    ${isMyBooking && !isClosed ? 'bg-blue-50/50' : ''}
+                    ${inRange && !isWknd && !isHoliday && !isClosed ? 'bg-blue-100/50' : ''}
+                    ${isStart && !isWknd && !isHoliday && !isClosed ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
+                    ${isEnd && !isWknd && !isHoliday && !isClosed ? 'bg-blue-200 ring-2 ring-blue-500' : ''}
                   `}
                                 >
                                     <div className="flex justify-between items-start mb-1 flex-shrink-0">
                                         <span className={`
                       text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full
-                      ${isToday(day) ? 'bg-blue-600 text-white' : isHoliday ? 'text-amber-700 font-semibold' : 'text-slate-700'}
-                      ${isWknd && !isHoliday ? 'text-slate-400' : ''}
+                      ${isClosed ? 'text-slate-500' : isToday(day) ? 'bg-blue-600 text-white' : isHoliday ? 'text-amber-700 font-semibold' : 'text-slate-700'}
+                      ${isWknd && !isHoliday && !isClosed ? 'text-slate-400' : ''}
                     `}>
                                             {format(day, 'd')}
                                         </span>
-                                        {isHoliday && (
+                                        {isClosed && (
+                                            <span className="text-[10px] bg-slate-300 text-slate-700 px-1 py-0.5 rounded font-medium">
+                                                Închis
+                                            </span>
+                                        )}
+                                        {isHoliday && !isClosed && (
                                             <span className="text-[10px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">
                                                 Sărbătoare
                                             </span>
                                         )}
-                                        {isMyBooking && !isHoliday && (
+                                        {isMyBooking && !isHoliday && !isClosed && (
                                             <span className="text-[10px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded font-medium">
                                                 Concediul Tău
                                             </span>

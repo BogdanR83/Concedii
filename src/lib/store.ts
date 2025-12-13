@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { BookingState, Booking, User, MedicalLeave } from './types';
+import type { BookingState, Booking, User, MedicalLeave, ClosedPeriod, Role } from './types';
 import { MOCK_USERS, formatDate, isDateRangeInSpecialPeriod, calculateWorkingDaysExcludingHolidays } from './utils';
-import { usersApi, bookingsApi, medicalLeaveApi } from './api';
+import { usersApi, bookingsApi, medicalLeaveApi, closedPeriodsApi } from './api';
 
 // Check if Supabase is configured
 const isSupabaseConfigured = () => {
@@ -25,6 +25,7 @@ export const useStore = create<BookingState>()(
                 }),
                 bookings: [] as Booking[],
                 medicalLeaves: [] as MedicalLeave[],
+                closedPeriods: [] as ClosedPeriod[],
             };
 
             // Load data from Supabase if configured (async, won't block initial render)
@@ -61,6 +62,15 @@ export const useStore = create<BookingState>()(
                     })
                     .catch(err => {
                         console.error('Failed to load medical leaves from Supabase:', err);
+                    });
+
+                // Load closed periods
+                closedPeriodsApi.getAll()
+                    .then(closedPeriods => {
+                        set({ closedPeriods });
+                    })
+                    .catch(err => {
+                        console.error('Failed to load closed periods from Supabase:', err);
                     });
             }
 
@@ -171,7 +181,7 @@ export const useStore = create<BookingState>()(
                 }
 
                 // Check if the date range is in a special period (no restrictions)
-                const isSpecialPeriod = isDateRangeInSpecialPeriod(startDate, endDate);
+                const isSpecialPeriod = isDateRangeInSpecialPeriod(startDate, endDate, get().closedPeriods);
 
                 // Only check constraints if NOT in special period
                 if (!isSpecialPeriod) {
@@ -377,6 +387,86 @@ export const useStore = create<BookingState>()(
                 set((state) => ({
                     medicalLeaves: state.medicalLeaves.filter((ml) => ml.id !== medicalLeaveId),
                 }));
+            },
+
+            createUser: async (name: string, role: Role, username: string, password: string) => {
+                if (!isSupabaseConfigured()) {
+                    return { success: false, error: 'Baza de date nu este configurată' };
+                }
+
+                try {
+                    const result = await usersApi.create({ name, role, username, password });
+                    if (result.success && result.user) {
+                        // Reload users to get the updated list
+                        const users = await usersApi.getAll();
+                        const sorted = users.sort((a, b) => {
+                            if (a.role === 'ADMIN' && b.role !== 'ADMIN') return -1;
+                            if (a.role !== 'ADMIN' && b.role === 'ADMIN') return 1;
+                            return a.name.localeCompare(b.name, 'ro');
+                        });
+                        set({ users: sorted });
+                        return { success: true };
+                    }
+                    return result;
+                } catch (err: any) {
+                    return { success: false, error: err.message || 'Eroare la crearea utilizatorului' };
+                }
+            },
+
+            toggleUserActive: async (userId: string) => {
+                if (!isSupabaseConfigured()) {
+                    return { success: false, error: 'Baza de date nu este configurată' };
+                }
+
+                try {
+                    const result = await usersApi.toggleActive(userId);
+                    if (result.success) {
+                        // Reload users to get the updated list
+                        const users = await usersApi.getAll();
+                        const sorted = users.sort((a, b) => {
+                            if (a.role === 'ADMIN' && b.role !== 'ADMIN') return -1;
+                            if (a.role !== 'ADMIN' && b.role === 'ADMIN') return 1;
+                            return a.name.localeCompare(b.name, 'ro');
+                        });
+                        set({ users: sorted });
+                    }
+                    return result;
+                } catch (err: any) {
+                    return { success: false, error: err.message || 'Eroare la actualizarea statusului' };
+                }
+            },
+
+            addClosedPeriod: async (startDate: string, endDate: string, description?: string) => {
+                if (!isSupabaseConfigured()) {
+                    return { success: false, error: 'Baza de date nu este configurată' };
+                }
+
+                try {
+                    const newPeriod = await closedPeriodsApi.create({ startDate, endDate, description });
+                    set((state) => ({
+                        closedPeriods: [...state.closedPeriods, newPeriod].sort((a, b) => 
+                            new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+                        ),
+                    }));
+                    return { success: true };
+                } catch (err: any) {
+                    return { success: false, error: err.message || 'Eroare la adăugarea perioadei' };
+                }
+            },
+
+            removeClosedPeriod: async (closedPeriodId: string) => {
+                if (!isSupabaseConfigured()) {
+                    return;
+                }
+
+                try {
+                    await closedPeriodsApi.delete(closedPeriodId);
+                    set((state) => ({
+                        closedPeriods: state.closedPeriods.filter((cp) => cp.id !== closedPeriodId),
+                    }));
+                } catch (err: any) {
+                    console.error('Error removing closed period:', err);
+                }
             },
             };
         },

@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { LogOut, Calendar as CalendarIcon, FileText, Users, RefreshCw, ChevronLeft, ChevronRight, X, UserPlus, UserMinus, Lock } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachMonthOfInterval, eachDayOfInterval, isWeekend, addMonths, subMonths, isToday, getDay } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { calculateUserAvailableDaysSync, usersApi } from '../lib/api';
 import { AdminBookingModal } from './AdminBookingModal';
+import { AddUserModal } from './AddUserModal';
+import { DatePicker } from './DatePicker';
 import { formatDate, getHolidayDates, calculateWorkingDaysExcludingHolidaysSync } from '../lib/utils';
 
 export function AdminDashboard() {
-    const { currentUser, logout, bookings, medicalLeaves, users, setUserMaxVacationDays, resetUserPassword, removeBooking, removeMedicalLeave } = useStore();
-    const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar'>('calendar');
+    const { currentUser, logout, bookings, medicalLeaves, users, closedPeriods, setUserMaxVacationDays, resetUserPassword, removeBooking, removeMedicalLeave, createUser, toggleUserActive, addClosedPeriod, removeClosedPeriod } = useStore();
+    const [view, setView] = useState<'all' | 'report' | 'users' | 'calendar' | 'closed'>('calendar');
     const [resettingPassword, setResettingPassword] = useState<string | null>(null);
     const [editingDaysForUser, setEditingDaysForUser] = useState<string | null>(null);
     const [tempDays, setTempDays] = useState<string>('');
@@ -17,6 +19,11 @@ export function AdminDashboard() {
     const [resettingYearly, setResettingYearly] = useState(false);
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDateForBooking, setSelectedDateForBooking] = useState<Date | null>(null);
+    const [showAddUserModal, setShowAddUserModal] = useState(false);
+    const [showAddClosedPeriodModal, setShowAddClosedPeriodModal] = useState(false);
+    const [closedPeriodStartDate, setClosedPeriodStartDate] = useState<string>('');
+    const [closedPeriodEndDate, setClosedPeriodEndDate] = useState<string>('');
+    const [closedPeriodDescription, setClosedPeriodDescription] = useState<string>('');
 
     // Load holidays for the current year and next year
     useEffect(() => {
@@ -157,6 +164,26 @@ export function AdminDashboard() {
                         usedDays2025 += calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
                     });
                     
+                    // Add closed periods from 2025 (check if period overlaps with 2025)
+                    if (closedPeriods && closedPeriods.length > 0) {
+                        for (const period of closedPeriods) {
+                            const periodStart = new Date(period.startDate);
+                            const periodEnd = new Date(period.endDate);
+                            // Check if period overlaps with 2025 (period starts before/on 2025 and ends after/on 2025)
+                            if (periodStart.getFullYear() <= 2025 && periodEnd.getFullYear() >= 2025) {
+                                let actualStart = periodStart;
+                                let actualEnd = periodEnd;
+                                if (periodStart.getFullYear() < 2025) {
+                                    actualStart = new Date(2025, 0, 1);
+                                }
+                                if (periodEnd.getFullYear() > 2025) {
+                                    actualEnd = new Date(2025, 11, 31);
+                                }
+                                usedDays2025 += calculateWorkingDaysExcludingHolidaysSync(actualStart, actualEnd, holidayDates);
+                            }
+                        }
+                    }
+                    
                     const total2025 = maxDays + (userData.remainingDaysFromPreviousYear || 0);
                     effectiveRemainingFromPrevious = Math.max(0, total2025 - usedDays2025);
                 }
@@ -180,6 +207,25 @@ export function AdminDashboard() {
                     const end = new Date(booking.endDate);
                     usedDaysUpToMonth += calculateWorkingDaysExcludingHolidaysSync(start, end, holidayDates);
                 });
+                
+                // Add closed periods up to end of this month (everyone is on vacation during closed periods)
+                if (closedPeriods && closedPeriods.length > 0) {
+                    for (const period of closedPeriods) {
+                        const periodStart = new Date(period.startDate);
+                        const periodEnd = new Date(period.endDate);
+                        const monthStart = startOfMonth(month);
+                        const monthEnd = endOfMonth(month);
+                        
+                        // Check if period overlaps with the current month (period starts before/on month end and ends after/on month start)
+                        if (periodStart <= monthEnd && periodEnd >= monthStart) {
+                            // Calculate working days for the part of the period that overlaps with this month
+                            let actualStart = periodStart > monthStart ? periodStart : monthStart;
+                            let actualEnd = periodEnd < monthEnd ? periodEnd : monthEnd;
+                            
+                            usedDaysUpToMonth += calculateWorkingDaysExcludingHolidaysSync(actualStart, actualEnd, holidayDates);
+                        }
+                    }
+                }
                 
                 // Calculate remaining days at end of this month
                 const totalAvailable = maxDays + effectiveRemainingFromPrevious;
@@ -325,6 +371,17 @@ export function AdminDashboard() {
                         <Users className="w-4 h-4" />
                         Gestionare utilizatori
                     </button>
+                    <button
+                        onClick={() => setView('closed')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                            view === 'closed'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        <Lock className="w-4 h-4" />
+                        Zile închis
+                    </button>
                 </div>
 
                 {/* Calendar View */}
@@ -414,8 +471,8 @@ export function AdminDashboard() {
                             </div>
 
                             <div className="grid grid-cols-7 flex-1 min-h-0 overflow-y-auto">
-                                {/* Empty cells for start of month */}
-                                {Array.from({ length: (monthStart.getDay() + 6) % 7 }).map((_, i) => (
+                                {/* Empty cells for start of month - week starts on Monday (1) */}
+                                {Array.from({ length: (getDay(monthStart) + 6) % 7 }).map((_, i) => (
                                     <div key={`empty-${i}`} className="bg-slate-50/30 border-b border-r border-slate-100" />
                                 ))}
 
@@ -714,8 +771,15 @@ export function AdminDashboard() {
                 {/* Users Management View */}
                 {view === 'users' && (
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0 flex items-center justify-between">
                             <h2 className="text-lg font-semibold text-slate-900">Gestionare utilizatori</h2>
+                            <button
+                                onClick={() => setShowAddUserModal(true)}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2"
+                            >
+                                <UserPlus className="w-4 h-4" />
+                                Adaugă utilizator
+                            </button>
                         </div>
                         <div className="p-4 overflow-y-auto flex-1">
                             {users.length === 0 ? (
@@ -723,7 +787,7 @@ export function AdminDashboard() {
                             ) : (
                                 <div className="space-y-3">
                                     {users.map((user) => {
-                                        const userRemainingDays = calculateUserAvailableDaysSync(user, bookings, holidayDates);
+                                        const userRemainingDays = calculateUserAvailableDaysSync(user, bookings, holidayDates, closedPeriods);
                                         const maxDays = user.maxVacationDays || 28;
                                         const remainingFromPrevious = user.remainingDaysFromPreviousYear || 0;
                                         
@@ -741,7 +805,16 @@ export function AdminDashboard() {
                                                             : 'bg-slate-500'
                                                         }`} />
                                                         <div>
-                                                            <p className="font-medium text-slate-900">{user.name}</p>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className={`font-medium ${user.active === false ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+                                                                    {user.name}
+                                                                </p>
+                                                                {user.active === false && (
+                                                                    <span className="text-xs bg-slate-300 text-slate-700 px-2 py-0.5 rounded">
+                                                                        Inactiv
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <div className="flex items-center gap-3 text-sm text-slate-500">
                                                                 <span>
                                                                     {user.role === 'ADMIN' ? 'Administrator' 
@@ -756,6 +829,32 @@ export function AdminDashboard() {
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const result = await toggleUserActive(user.id);
+                                                            if (!result.success) {
+                                                                alert(result.error || 'Eroare la actualizarea statusului');
+                                                            }
+                                                        }}
+                                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 ${
+                                                            user.active === false
+                                                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                                                : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                                        }`}
+                                                        title={user.active === false ? 'Activează utilizatorul' : 'Inactivează utilizatorul'}
+                                                    >
+                                                        {user.active === false ? (
+                                                            <>
+                                                                <UserPlus className="w-4 h-4" />
+                                                                Activează
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <UserMinus className="w-4 h-4" />
+                                                                Inactivează
+                                                            </>
+                                                        )}
+                                                    </button>
                                                 </div>
                                                 
                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-sm">
@@ -859,6 +958,72 @@ export function AdminDashboard() {
                     </div>
                 )}
 
+                {/* Closed Periods Management View */}
+                {view === 'closed' && (
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0">
+                        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0 flex items-center justify-between">
+                            <h2 className="text-lg font-semibold text-slate-900">Zile când grădinița este închisă</h2>
+                            <button
+                                onClick={() => setShowAddClosedPeriodModal(true)}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2"
+                            >
+                                <Lock className="w-4 h-4" />
+                                Adaugă perioadă
+                            </button>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1">
+                            {closedPeriods.length === 0 ? (
+                                <p className="text-slate-500 text-center py-8">Nu există perioade închise configurate.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {closedPeriods.map((period) => (
+                                        <div
+                                            key={period.id}
+                                            className="p-4 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors"
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <Lock className="w-4 h-4 text-slate-600" />
+                                                        <span className="font-medium text-slate-900">
+                                                            {new Date(period.startDate).toLocaleDateString('ro-RO', {
+                                                                day: 'numeric',
+                                                                month: 'long',
+                                                                year: 'numeric'
+                                                            })}
+                                                            {period.startDate !== period.endDate && (
+                                                                <> - {new Date(period.endDate).toLocaleDateString('ro-RO', {
+                                                                    day: 'numeric',
+                                                                    month: 'long',
+                                                                    year: 'numeric'
+                                                                })}</>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                    {period.description && (
+                                                        <p className="text-sm text-slate-600 ml-6">{period.description}</p>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={async () => {
+                                                        if (confirm('Ești sigur că vrei să ștergi această perioadă?')) {
+                                                            await removeClosedPeriod(period.id);
+                                                        }
+                                                    }}
+                                                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+                                                    title="Șterge perioada"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Admin Booking Modal */}
                 {selectedDateForBooking && (
                     <AdminBookingModal
@@ -868,6 +1033,149 @@ export function AdminDashboard() {
                 )}
 
             </div>
+
+            {/* Add User Modal */}
+            {showAddUserModal && (
+                <AddUserModal
+                    onClose={() => setShowAddUserModal(false)}
+                    onCreate={async (name, role, username, password) => {
+                        const result = await createUser(name, role, username, password);
+                        return result;
+                    }}
+                />
+            )}
+
+            {/* Add Closed Period Modal */}
+            {showAddClosedPeriodModal && (() => {
+                const [error, setError] = useState<string | null>(null);
+                const [adding, setAdding] = useState(false);
+
+                const handleSubmit = async () => {
+                    setError(null);
+
+                    if (!closedPeriodStartDate || !closedPeriodEndDate) {
+                        setError('Te rugăm să completezi ambele date.');
+                        return;
+                    }
+
+                    if (new Date(closedPeriodStartDate) > new Date(closedPeriodEndDate)) {
+                        setError('Data de început trebuie să fie înainte de data de sfârșit.');
+                        return;
+                    }
+
+                    setAdding(true);
+                    const result = await addClosedPeriod(
+                        closedPeriodStartDate,
+                        closedPeriodEndDate,
+                        closedPeriodDescription.trim() || undefined
+                    );
+                    setAdding(false);
+
+                    if (result.success) {
+                        setShowAddClosedPeriodModal(false);
+                        // Reset form
+                        setClosedPeriodStartDate('');
+                        setClosedPeriodEndDate('');
+                        setClosedPeriodDescription('');
+                        setError(null);
+                    } else {
+                        setError(result.error || 'Eroare la adăugarea perioadei');
+                    }
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+                            <div className="p-6">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                                        <Lock className="w-5 h-5 text-blue-600" />
+                                        Adaugă perioadă închisă
+                                    </h2>
+                                    <button 
+                                        onClick={() => {
+                                            setShowAddClosedPeriodModal(false);
+                                            setClosedPeriodStartDate('');
+                                            setClosedPeriodEndDate('');
+                                            setClosedPeriodDescription('');
+                                            setError(null);
+                                        }} 
+                                        className="text-slate-400 hover:text-slate-600"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+
+                                <div className="mb-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                            Data de început: *
+                                        </label>
+                                        <DatePicker
+                                            value={closedPeriodStartDate}
+                                            onChange={setClosedPeriodStartDate}
+                                            min={formatDate(new Date())}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                            Data de sfârșit: *
+                                        </label>
+                                        <DatePicker
+                                            value={closedPeriodEndDate}
+                                            onChange={setClosedPeriodEndDate}
+                                            min={closedPeriodStartDate || formatDate(new Date())}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                            Descriere (opțional):
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={closedPeriodDescription}
+                                            onChange={(e) => setClosedPeriodDescription(e.target.value)}
+                                            placeholder="Ex: Vacanță de vară"
+                                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                {error && (
+                                    <div className="mb-6 p-3 bg-red-50 text-red-700 text-sm rounded-lg">
+                                        {error}
+                                    </div>
+                                )}
+
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setShowAddClosedPeriodModal(false);
+                                            setClosedPeriodStartDate('');
+                                            setClosedPeriodEndDate('');
+                                            setClosedPeriodDescription('');
+                                            setError(null);
+                                        }}
+                                        className="flex-1 px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium"
+                                        disabled={adding}
+                                    >
+                                        Anulează
+                                    </button>
+                                    <button
+                                        onClick={handleSubmit}
+                                        disabled={adding}
+                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {adding ? 'Se adaugă...' : 'Adaugă'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }
