@@ -24,6 +24,46 @@ export function AdminDashboard() {
     const [closedPeriodStartDate, setClosedPeriodStartDate] = useState<string>('');
     const [closedPeriodEndDate, setClosedPeriodEndDate] = useState<string>('');
     const [closedPeriodDescription, setClosedPeriodDescription] = useState<string>('');
+    const [closedPeriodError, setClosedPeriodError] = useState<string | null>(null);
+    const [addingClosedPeriod, setAddingClosedPeriod] = useState(false);
+
+    // Handler for closing the closed period modal
+    const handleCloseClosedPeriodModal = () => {
+        setShowAddClosedPeriodModal(false);
+        setClosedPeriodStartDate('');
+        setClosedPeriodEndDate('');
+        setClosedPeriodDescription('');
+        setClosedPeriodError(null);
+    };
+
+    // Handler for submitting the closed period form
+    const handleSubmitClosedPeriod = async () => {
+        setClosedPeriodError(null);
+
+        if (!closedPeriodStartDate || !closedPeriodEndDate) {
+            setClosedPeriodError('Te rugăm să completezi ambele date.');
+            return;
+        }
+
+        if (new Date(closedPeriodStartDate) > new Date(closedPeriodEndDate)) {
+            setClosedPeriodError('Data de început trebuie să fie înainte de data de sfârșit.');
+            return;
+        }
+
+        setAddingClosedPeriod(true);
+        const result = await addClosedPeriod(
+            closedPeriodStartDate,
+            closedPeriodEndDate,
+            closedPeriodDescription.trim() || undefined
+        );
+        setAddingClosedPeriod(false);
+
+        if (result.success) {
+            handleCloseClosedPeriodModal();
+        } else {
+            setClosedPeriodError(result.error || 'Eroare la adăugarea perioadei');
+        }
+    };
 
     // Load holidays for the current year and next year
     useEffect(() => {
@@ -1046,136 +1086,86 @@ export function AdminDashboard() {
             )}
 
             {/* Add Closed Period Modal */}
-            {showAddClosedPeriodModal && (() => {
-                const [error, setError] = useState<string | null>(null);
-                const [adding, setAdding] = useState(false);
+            {showAddClosedPeriodModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                                    <Lock className="w-5 h-5 text-blue-600" />
+                                    Adaugă perioadă închisă
+                                </h2>
+                                <button 
+                                    onClick={handleCloseClosedPeriodModal}
+                                    className="text-slate-400 hover:text-slate-600"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
 
-                const handleSubmit = async () => {
-                    setError(null);
-
-                    if (!closedPeriodStartDate || !closedPeriodEndDate) {
-                        setError('Te rugăm să completezi ambele date.');
-                        return;
-                    }
-
-                    if (new Date(closedPeriodStartDate) > new Date(closedPeriodEndDate)) {
-                        setError('Data de început trebuie să fie înainte de data de sfârșit.');
-                        return;
-                    }
-
-                    setAdding(true);
-                    const result = await addClosedPeriod(
-                        closedPeriodStartDate,
-                        closedPeriodEndDate,
-                        closedPeriodDescription.trim() || undefined
-                    );
-                    setAdding(false);
-
-                    if (result.success) {
-                        setShowAddClosedPeriodModal(false);
-                        // Reset form
-                        setClosedPeriodStartDate('');
-                        setClosedPeriodEndDate('');
-                        setClosedPeriodDescription('');
-                        setError(null);
-                    } else {
-                        setError(result.error || 'Eroare la adăugarea perioadei');
-                    }
-                };
-
-                return (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
-                            <div className="p-6">
-                                <div className="flex items-center justify-between mb-6">
-                                    <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
-                                        <Lock className="w-5 h-5 text-blue-600" />
-                                        Adaugă perioadă închisă
-                                    </h2>
-                                    <button 
-                                        onClick={() => {
-                                            setShowAddClosedPeriodModal(false);
-                                            setClosedPeriodStartDate('');
-                                            setClosedPeriodEndDate('');
-                                            setClosedPeriodDescription('');
-                                            setError(null);
-                                        }} 
-                                        className="text-slate-400 hover:text-slate-600"
-                                    >
-                                        <X className="w-5 h-5" />
-                                    </button>
+                            <div className="mb-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        Data de început: *
+                                    </label>
+                                    <DatePicker
+                                        value={closedPeriodStartDate}
+                                        onChange={setClosedPeriodStartDate}
+                                        min={formatDate(new Date())}
+                                    />
                                 </div>
 
-                                <div className="mb-6 space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            Data de început: *
-                                        </label>
-                                        <DatePicker
-                                            value={closedPeriodStartDate}
-                                            onChange={setClosedPeriodStartDate}
-                                            min={formatDate(new Date())}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            Data de sfârșit: *
-                                        </label>
-                                        <DatePicker
-                                            value={closedPeriodEndDate}
-                                            onChange={setClosedPeriodEndDate}
-                                            min={closedPeriodStartDate || formatDate(new Date())}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            Descriere (opțional):
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={closedPeriodDescription}
-                                            onChange={(e) => setClosedPeriodDescription(e.target.value)}
-                                            placeholder="Ex: Vacanță de vară"
-                                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                        />
-                                    </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        Data de sfârșit: *
+                                    </label>
+                                    <DatePicker
+                                        value={closedPeriodEndDate}
+                                        onChange={setClosedPeriodEndDate}
+                                        min={closedPeriodStartDate || formatDate(new Date())}
+                                    />
                                 </div>
 
-                                {error && (
-                                    <div className="mb-6 p-3 bg-red-50 text-red-700 text-sm rounded-lg">
-                                        {error}
-                                    </div>
-                                )}
-
-                                <div className="flex gap-3">
-                                    <button
-                                        onClick={() => {
-                                            setShowAddClosedPeriodModal(false);
-                                            setClosedPeriodStartDate('');
-                                            setClosedPeriodEndDate('');
-                                            setClosedPeriodDescription('');
-                                            setError(null);
-                                        }}
-                                        className="flex-1 px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium"
-                                        disabled={adding}
-                                    >
-                                        Anulează
-                                    </button>
-                                    <button
-                                        onClick={handleSubmit}
-                                        disabled={adding}
-                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {adding ? 'Se adaugă...' : 'Adaugă'}
-                                    </button>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        Descriere (opțional):
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={closedPeriodDescription}
+                                        onChange={(e) => setClosedPeriodDescription(e.target.value)}
+                                        placeholder="Ex: Vacanță de vară"
+                                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
                                 </div>
+                            </div>
+
+                            {closedPeriodError && (
+                                <div className="mb-6 p-3 bg-red-50 text-red-700 text-sm rounded-lg">
+                                    {closedPeriodError}
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleCloseClosedPeriodModal}
+                                    className="flex-1 px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium"
+                                    disabled={addingClosedPeriod}
+                                >
+                                    Anulează
+                                </button>
+                                <button
+                                    onClick={handleSubmitClosedPeriod}
+                                    disabled={addingClosedPeriod}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {addingClosedPeriod ? 'Se adaugă...' : 'Adaugă'}
+                                </button>
                             </div>
                         </div>
                     </div>
-                );
-            })()}
+                </div>
+            )}
         </div>
     );
 }
