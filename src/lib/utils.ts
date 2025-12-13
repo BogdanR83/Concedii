@@ -22,7 +22,22 @@ export const MOCK_USERS: User[] = [
 ];
 
 export function formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
+    // Use local date components to avoid timezone issues
+    // This ensures the date string matches what the user sees in the calendar
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Formats a date string (YYYY-MM-DD) to local date string without timezone conversion
+ * This prevents the date from shifting by one day when converting from UTC
+ */
+export function formatDateStringToLocal(dateString: string, options?: Intl.DateTimeFormatOptions): string {
+    const [year, month, day] = dateString.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('ro-RO', options);
 }
 
 // Interface for holiday API response

@@ -12,7 +12,7 @@ import {
     isSameDay
 } from 'date-fns';
 import { ro } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, LogOut, User as UserIcon, Trash2, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LogOut, User as UserIcon, Trash2, Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { BookingModal } from './BookingModal';
 import { formatDate, getHolidayDates } from '../lib/utils';
@@ -21,6 +21,7 @@ export function Calendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [startDateSelected, setStartDateSelected] = useState<Date | null>(null);
     const [endDateSelected, setEndDateSelected] = useState<Date | null>(null);
+    const [showBookingModal, setShowBookingModal] = useState(false);
     const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
     const { currentUser, logout, bookings, users, removeBooking } = useStore();
 
@@ -87,9 +88,11 @@ export function Calendar() {
         today.setHours(0, 0, 0, 0);
         const dayNormalized = new Date(day);
         dayNormalized.setHours(0, 0, 0, 0);
+        const dayYear = dayNormalized.getFullYear();
 
-        // If clicking on a past date, weekend, or full day, do nothing
-        if (isBefore(dayNormalized, today) || isWeekend(day)) {
+        // Allow dates from 2025 or earlier (including past dates)
+        // Block dates from 2026 onwards
+        if (dayYear > 2025 || isWeekend(day)) {
             return;
         }
 
@@ -200,6 +203,11 @@ export function Calendar() {
                                     Selectează data de sfârșit
                                 </p>
                             )}
+                            {startDateSelected && endDateSelected && (
+                                <p className="text-xs text-green-600 mt-1 font-medium">
+                                    Perioadă selectată: {format(startDateSelected, 'dd MMM', { locale: ro })} - {format(endDateSelected, 'dd MMM yyyy', { locale: ro })}
+                                </p>
+                            )}
                         </div>
                         <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                             <ChevronRight className="w-5 h-5 text-slate-600" />
@@ -291,6 +299,39 @@ export function Calendar() {
                             );
                         })}
                     </div>
+
+                    {/* Selection Confirmation Bar */}
+                    {startDateSelected && endDateSelected && !showBookingModal && (
+                        <div className="p-3 border-t border-slate-200 bg-blue-50 flex items-center justify-between flex-shrink-0">
+                            <div className="flex items-center gap-2">
+                                <CalendarIcon className="w-4 h-4 text-blue-600" />
+                                <span className="text-sm text-slate-700">
+                                    Perioadă selectată: <span className="font-semibold text-blue-700">
+                                        {format(startDateSelected, 'dd MMM yyyy', { locale: ro })} - {format(endDateSelected, 'dd MMM yyyy', { locale: ro })}
+                                    </span>
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        setStartDateSelected(null);
+                                        setEndDateSelected(null);
+                                    }}
+                                    className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1"
+                                >
+                                    <X className="w-4 h-4" />
+                                    Anulează
+                                </button>
+                                <button
+                                    onClick={() => setShowBookingModal(true)}
+                                    className="px-4 py-1.5 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1 font-medium"
+                                >
+                                    <Check className="w-4 h-4" />
+                                    Confirmă
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* My Bookings Section */}
@@ -342,11 +383,12 @@ export function Calendar() {
                 )}
             </div>
 
-            {startDateSelected && endDateSelected && (
+            {showBookingModal && startDateSelected && endDateSelected && (
                 <BookingModal
                     date={startDateSelected}
                     endDate={endDateSelected}
                     onClose={() => {
+                        setShowBookingModal(false);
                         setStartDateSelected(null);
                         setEndDateSelected(null);
                     }}

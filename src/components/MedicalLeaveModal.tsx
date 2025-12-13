@@ -2,6 +2,8 @@ import React from 'react';
 import { X, AlertCircle, FileText } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { eachDayOfInterval, isWeekend } from 'date-fns';
+import { formatDateStringToLocal } from '../lib/utils';
+import { DatePicker } from './DatePicker';
 
 interface MedicalLeaveModalProps {
     onClose: () => void;
@@ -129,35 +131,22 @@ export function MedicalLeaveModal({ onClose }: MedicalLeaveModalProps) {
                             </select>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de început:
-                            </label>
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => {
-                                    setStartDate(e.target.value);
-                                    if (e.target.value > endDate) {
-                                        setEndDate(e.target.value);
-                                    }
-                                }}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de sfârșit:
-                            </label>
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                min={startDate}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                            />
-                        </div>
+                        <DatePicker
+                            label="Data de început:"
+                            value={startDate}
+                            onChange={(value) => {
+                                setStartDate(value);
+                                if (value > endDate) {
+                                    setEndDate(value);
+                                }
+                            }}
+                        />
+                        <DatePicker
+                            label="Data de sfârșit:"
+                            value={endDate}
+                            onChange={setEndDate}
+                            min={startDate}
+                        />
 
                         {startDate && endDate && (
                             <div className="bg-slate-50 p-3 rounded-lg">
@@ -166,7 +155,7 @@ export function MedicalLeaveModal({ onClose }: MedicalLeaveModalProps) {
                                 </p>
                                 {startDate === endDate ? (
                                     <p className="text-sm text-slate-600 mt-1">
-                                        Perioadă: <span className="font-medium">{new Date(startDate).toLocaleDateString('ro-RO', {
+                                        Perioadă: <span className="font-medium">{formatDateStringToLocal(startDate, {
                                             weekday: 'long',
                                             year: 'numeric',
                                             month: 'long',
@@ -176,7 +165,7 @@ export function MedicalLeaveModal({ onClose }: MedicalLeaveModalProps) {
                                 ) : (
                                     <p className="text-sm text-slate-600 mt-1">
                                         Perioadă: <span className="font-medium">
-                                            {new Date(startDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })} - {new Date(endDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                            {formatDateStringToLocal(startDate, { day: 'numeric', month: 'long', year: 'numeric' })} - {formatDateStringToLocal(endDate, { day: 'numeric', month: 'long', year: 'numeric' })}
                                         </span>
                                     </p>
                                 )}

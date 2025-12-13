@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Calendar as CalendarIcon, AlertCircle } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { formatDate } from '../lib/utils';
+import { formatDate, formatDateStringToLocal } from '../lib/utils';
+import { DatePicker } from './DatePicker';
 
 interface BookingModalProps {
     date: Date;
@@ -57,38 +58,28 @@ export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
                     </div>
 
                     <div className="mb-6 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de început:
-                            </label>
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => {
-                                    setStartDate(e.target.value);
-                                    if (e.target.value > endDateState) {
-                                        setEndDateState(e.target.value);
-                                    }
-                                }}
-                                min={formatDate(new Date())}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de sfârșit:
-                            </label>
-                            <input
-                                type="date"
-                                value={endDateState}
-                                onChange={(e) => setEndDateState(e.target.value)}
-                                min={startDate}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            />
-                        </div>
+                        <DatePicker
+                            label="Data de început:"
+                            value={startDate}
+                            onChange={(value) => {
+                                setStartDate(value);
+                                if (value > endDateState) {
+                                    setEndDateState(value);
+                                }
+                            }}
+                            min="2020-01-01"
+                            max="2025-12-31"
+                        />
+                        <DatePicker
+                            label="Data de sfârșit:"
+                            value={endDateState}
+                            onChange={setEndDateState}
+                            min={startDate}
+                            max="2025-12-31"
+                        />
                         {startDate === endDateState ? (
                             <p className="text-sm text-slate-600">
-                                Perioadă: <span className="font-medium">{new Date(startDate).toLocaleDateString('ro-RO', {
+                                Perioadă: <span className="font-medium">{formatDateStringToLocal(startDate, {
                                     weekday: 'long',
                                     year: 'numeric',
                                     month: 'long',
@@ -98,7 +89,7 @@ export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
                         ) : (
                             <p className="text-sm text-slate-600">
                                 Perioadă: <span className="font-medium">
-                                    {new Date(startDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })} - {new Date(endDateState).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    {formatDateStringToLocal(startDate, { day: 'numeric', month: 'long', year: 'numeric' })} - {formatDateStringToLocal(endDateState, { day: 'numeric', month: 'long', year: 'numeric' })}
                                 </span>
                             </p>
                         )}

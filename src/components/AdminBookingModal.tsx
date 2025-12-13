@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Calendar as CalendarIcon, User, FileText } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { formatDate } from '../lib/utils';
+import { formatDate, formatDateStringToLocal } from '../lib/utils';
+import { DatePicker } from './DatePicker';
 
 interface AdminBookingModalProps {
     date: Date;
@@ -161,37 +162,28 @@ export function AdminBookingModal({ date, onClose }: AdminBookingModalProps) {
                             </div>
                         )}
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de început:
-                            </label>
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => {
-                                    setStartDate(e.target.value);
-                                    if (e.target.value > endDate) {
-                                        setEndDate(e.target.value);
-                                    }
-                                }}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Data de sfârșit:
-                            </label>
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                min={startDate}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            />
-                        </div>
+                        <DatePicker
+                            label="Data de început:"
+                            value={startDate}
+                            onChange={(value) => {
+                                setStartDate(value);
+                                if (value > endDate) {
+                                    setEndDate(value);
+                                }
+                            }}
+                            min="2020-01-01"
+                            max="2025-12-31"
+                        />
+                        <DatePicker
+                            label="Data de sfârșit:"
+                            value={endDate}
+                            onChange={setEndDate}
+                            min={startDate}
+                            max="2025-12-31"
+                        />
                         {startDate === endDate ? (
                             <p className="text-sm text-slate-600">
-                                Perioadă: <span className="font-medium">{new Date(startDate).toLocaleDateString('ro-RO', {
+                                Perioadă: <span className="font-medium">{formatDateStringToLocal(startDate, {
                                     weekday: 'long',
                                     year: 'numeric',
                                     month: 'long',
@@ -201,7 +193,7 @@ export function AdminBookingModal({ date, onClose }: AdminBookingModalProps) {
                         ) : (
                             <p className="text-sm text-slate-600">
                                 Perioadă: <span className="font-medium">
-                                    {new Date(startDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })} - {new Date(endDate).toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    {formatDateStringToLocal(startDate, { day: 'numeric', month: 'long', year: 'numeric' })} - {formatDateStringToLocal(endDate, { day: 'numeric', month: 'long', year: 'numeric' })}
                                 </span>
                             </p>
                         )}
