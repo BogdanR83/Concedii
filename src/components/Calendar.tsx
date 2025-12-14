@@ -105,9 +105,10 @@ export function Calendar() {
         dayNormalized.setHours(0, 0, 0, 0);
         const dayYear = dayNormalized.getFullYear();
 
-        // Allow dates from 2025 or earlier (including past dates)
+        // Block past dates (users cannot retroactively book vacation)
         // Block dates from 2026 onwards
-        if (dayYear > 2025 || isWeekend(day)) {
+        // Block weekends
+        if (isBefore(dayNormalized, today) || dayYear > 2025 || isWeekend(day)) {
             return;
         }
 

@@ -672,22 +672,17 @@ export async function calculateUserAvailableDays(user: User, bookings: Booking[]
     for (const period of closedPeriods) {
       const periodStart = new Date(period.startDate);
       const periodEnd = new Date(period.endDate);
-      const periodYear = periodStart.getFullYear();
       
-      // Only count closed periods from current year
-      if (periodYear === currentYear) {
-        // Check if period overlaps with current year
-        const periodStartYear = periodStart.getFullYear();
-        const periodEndYear = periodEnd.getFullYear();
-        
+      // Check if period overlaps with current year (period starts before/on current year and ends after/on current year)
+      if (periodStart.getFullYear() <= currentYear && periodEnd.getFullYear() >= currentYear) {
         // Calculate working days for the part of the period that's in current year
         let actualStart = periodStart;
         let actualEnd = periodEnd;
         
-        if (periodStartYear < currentYear) {
+        if (periodStart.getFullYear() < currentYear) {
           actualStart = new Date(currentYear, 0, 1); // January 1 of current year
         }
-        if (periodEndYear > currentYear) {
+        if (periodEnd.getFullYear() > currentYear) {
           actualEnd = new Date(currentYear, 11, 31); // December 31 of current year
         }
         
@@ -736,22 +731,17 @@ export function calculateUserAvailableDaysSync(user: User, bookings: Booking[], 
     for (const period of closedPeriods) {
       const periodStart = new Date(period.startDate);
       const periodEnd = new Date(period.endDate);
-      const periodYear = periodStart.getFullYear();
       
-      // Only count closed periods from current year
-      if (periodYear === currentYear) {
-        // Check if period overlaps with current year
-        const periodStartYear = periodStart.getFullYear();
-        const periodEndYear = periodEnd.getFullYear();
-        
+      // Check if period overlaps with current year (period starts before/on current year and ends after/on current year)
+      if (periodStart.getFullYear() <= currentYear && periodEnd.getFullYear() >= currentYear) {
         // Calculate working days for the part of the period that's in current year
         let actualStart = periodStart;
         let actualEnd = periodEnd;
         
-        if (periodStartYear < currentYear) {
+        if (periodStart.getFullYear() < currentYear) {
           actualStart = new Date(currentYear, 0, 1); // January 1 of current year
         }
-        if (periodEndYear > currentYear) {
+        if (periodEnd.getFullYear() > currentYear) {
           actualEnd = new Date(currentYear, 11, 31); // December 31 of current year
         }
         
