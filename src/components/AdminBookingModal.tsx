@@ -171,7 +171,6 @@ export function AdminBookingModal({ date, onClose }: AdminBookingModalProps) {
                                     setEndDate(value);
                                 }
                             }}
-                            min={formatDate(new Date())}
                         />
                         <DatePicker
                             label="Data de sfârșit:"
