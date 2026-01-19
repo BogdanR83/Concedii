@@ -67,15 +67,13 @@ export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
                                     setEndDateState(value);
                                 }
                             }}
-                            min="2020-01-01"
-                            max="2025-12-31"
+                            min={formatDate(new Date())}
                         />
                         <DatePicker
                             label="Data de sfârșit:"
                             value={endDateState}
                             onChange={setEndDateState}
                             min={startDate}
-                            max="2025-12-31"
                         />
                         {startDate === endDateState ? (
                             <p className="text-sm text-slate-600">

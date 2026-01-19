@@ -210,8 +210,8 @@ export const useStore = create<BookingState>()(
                         const educatorsCount = bookedUsers.filter(u => u.role === 'EDUCATOR').length;
                         const auxiliaryCount = bookedUsers.filter(u => u.role === 'AUXILIARY').length;
 
-                        if (currentUser.role === 'EDUCATOR' && educatorsCount >= 1) {
-                            return { success: false, error: `Există deja o educatoare în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
+                        if (currentUser.role === 'EDUCATOR' && educatorsCount >= 2) {
+                            return { success: false, error: `Există deja 2 educatoare în concediu pe data ${new Date(dateStr).toLocaleDateString('ro-RO')}.` };
                         }
 
                         if (currentUser.role === 'AUXILIARY' && auxiliaryCount >= 1) {

@@ -77,12 +77,12 @@ export function Calendar() {
         }).length;
 
         // Day is full if the current user's role-specific limit is reached
-        // Educators can't book if another educator is already booked
+        // Educators can't book if two educators are already booked
         // Auxiliaries can't book if another auxiliary is already booked
         // Admins have no restrictions (isFull is always false for them)
         let isFull = false;
         if (currentUser?.role === 'EDUCATOR') {
-            isFull = educators >= 1;
+            isFull = educators >= 2;
         } else if (currentUser?.role === 'AUXILIARY') {
             isFull = auxiliaries >= 1;
         }
@@ -103,12 +103,10 @@ export function Calendar() {
         today.setHours(0, 0, 0, 0);
         const dayNormalized = new Date(day);
         dayNormalized.setHours(0, 0, 0, 0);
-        const dayYear = dayNormalized.getFullYear();
 
         // Block past dates (users cannot retroactively book vacation)
-        // Block dates from 2026 onwards
         // Block weekends
-        if (isBefore(dayNormalized, today) || dayYear > 2025 || isWeekend(day)) {
+        if (isBefore(dayNormalized, today) || isWeekend(day)) {
             return;
         }
 
@@ -306,13 +304,17 @@ export function Calendar() {
                                             {educators > 0 && (
                                                 <div className="flex items-center gap-1 text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
                                                     <div className="w-1 h-1 rounded-full bg-purple-500 flex-shrink-0" />
-                                                    <span className="truncate">1 Educatoare</span>
+                                                    <span className="truncate">
+                                                        {educators} Educatoare
+                                                    </span>
                                                 </div>
                                             )}
                                             {auxiliaries > 0 && (
                                                 <div className="flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
                                                     <div className="w-1 h-1 rounded-full bg-emerald-500 flex-shrink-0" />
-                                                    <span className="truncate">1 Auxiliar</span>
+                                                    <span className="truncate">
+                                                        {auxiliaries} {auxiliaries === 1 ? 'Auxiliar' : 'Auxiliari'}
+                                                    </span>
                                                 </div>
                                             )}
                                             {educators === 0 && auxiliaries === 0 && !isPast && (
