@@ -15,6 +15,11 @@ interface DatePickerProps {
 
 export function DatePicker({ value, onChange, min, max, label, className = '' }: DatePickerProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const formatInputValue = (isoValue: string) => {
+        if (!isoValue) return '';
+        return new Date(isoValue + 'T12:00:00').toLocaleDateString('ro-RO');
+    };
+    const [inputValue, setInputValue] = useState(() => formatInputValue(value));
     const [currentMonth, setCurrentMonth] = useState(() => {
         if (value) {
             const date = new Date(value + 'T12:00:00'); // Use noon to avoid timezone issues
@@ -47,6 +52,7 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
             const date = new Date(value + 'T12:00:00');
             setCurrentMonth(date);
         }
+        setInputValue(formatInputValue(value));
     }, [value]);
 
     const monthStart = startOfMonth(currentMonth);
@@ -57,12 +63,46 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
     // Adjust to start week on Monday (0 becomes 6, 1 becomes 0, etc.)
     const firstDayOfWeek = (getDay(monthStart) + 6) % 7; // Convert Sunday=0 to Monday=0
 
+    const isWithinLimits = (dayStr: string) => {
+        if (min && dayStr < min) return false;
+        if (max && dayStr > max) return false;
+        return true;
+    };
+
+    const parseInputToIso = (rawValue: string): string | null => {
+        const trimmed = rawValue.trim();
+        if (!trimmed) return null;
+        const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+        if (isoMatch) {
+            const iso = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+            const test = new Date(iso + 'T12:00:00');
+            if (!Number.isNaN(test.getTime())) return iso;
+            return null;
+        }
+        const roMatch = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(trimmed);
+        if (roMatch) {
+            const day = Number(roMatch[1]);
+            const month = Number(roMatch[2]);
+            const year = Number(roMatch[3]);
+            if (!day || !month || !year) return null;
+            const candidate = new Date(year, month - 1, day, 12, 0, 0);
+            if (
+                candidate.getFullYear() !== year ||
+                candidate.getMonth() !== month - 1 ||
+                candidate.getDate() !== day
+            ) {
+                return null;
+            }
+            return formatDate(candidate);
+        }
+        return null;
+    };
+
     const handleDateClick = (day: Date) => {
         const dayStr = formatDate(day);
         
         // Check min/max constraints
-        if (min && dayStr < min) return;
-        if (max && dayStr > max) return;
+        if (!isWithinLimits(dayStr)) return;
         
         onChange(dayStr);
         setIsOpen(false);
@@ -95,9 +135,7 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
 
     const isDateDisabled = (day: Date): boolean => {
         const dayStr = formatDate(day);
-        if (min && dayStr < min) return true;
-        if (max && dayStr > max) return true;
-        return false;
+        return !isWithinLimits(dayStr);
     };
 
     return (
@@ -110,9 +148,24 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
             <div className="relative">
                 <input
                     type="text"
-                    readOnly
-                    value={value ? new Date(value + 'T12:00:00').toLocaleDateString('ro-RO') : ''}
+                    value={inputValue}
                     onClick={() => setIsOpen(!isOpen)}
+                    onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setInputValue(nextValue);
+                        const parsedIso = parseInputToIso(nextValue);
+                        if (parsedIso && isWithinLimits(parsedIso)) {
+                            onChange(parsedIso);
+                        }
+                    }}
+                    onBlur={() => {
+                        const parsedIso = parseInputToIso(inputValue);
+                        if (parsedIso && isWithinLimits(parsedIso)) {
+                            setInputValue(formatInputValue(parsedIso));
+                        } else {
+                            setInputValue(formatInputValue(value));
+                        }
+                    }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer bg-white"
                     placeholder="Selectează data"
                 />
@@ -214,6 +267,7 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
                         <button
                             onClick={() => {
                                 onChange('');
+                                setInputValue('');
                                 setIsOpen(false);
                             }}
                             className="text-xs text-slate-600 hover:text-slate-800"
@@ -223,11 +277,10 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
                         <button
                             onClick={() => {
                                 const todayStr = formatDate(new Date());
-                                if (!min || todayStr >= min) {
-                                    if (!max || todayStr <= max) {
+                                if (isWithinLimits(todayStr)) {
                                         onChange(todayStr);
+                                        setInputValue(formatInputValue(todayStr));
                                         setIsOpen(false);
-                                    }
                                 }
                             }}
                             className="text-xs text-blue-600 hover:text-blue-800 font-medium"
