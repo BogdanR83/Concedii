@@ -106,7 +106,7 @@ export function Calendar() {
 
         // Block past dates (users cannot retroactively book vacation)
         // Block weekends
-        if (isBefore(dayNormalized, today) || isWeekend(day)) {
+        if ((isBefore(dayNormalized, today) && dayNormalized.getFullYear() !== 2025) || isWeekend(day)) {
             return;
         }
 

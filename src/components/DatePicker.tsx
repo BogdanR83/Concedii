@@ -20,6 +20,7 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
         return new Date(isoValue + 'T12:00:00').toLocaleDateString('ro-RO');
     };
     const [inputValue, setInputValue] = useState(() => formatInputValue(value));
+    const [inputError, setInputError] = useState<string | null>(null);
     const [currentMonth, setCurrentMonth] = useState(() => {
         if (value) {
             const date = new Date(value + 'T12:00:00'); // Use noon to avoid timezone issues
@@ -98,6 +99,14 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
         return null;
     };
 
+    const getFormatError = (rawValue: string): string | null => {
+        const trimmed = rawValue.trim();
+        if (!trimmed) return null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+        if (/^\d{1,2}[./]\d{1,2}[./]\d{4}$/.test(trimmed)) return null;
+        return 'Format invalid. Folosește dd.mm.yyyy, dd/mm/yyyy sau yyyy-mm-dd.';
+    };
+
     const handleDateClick = (day: Date) => {
         const dayStr = formatDate(day);
         
@@ -153,6 +162,7 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
                     onChange={(event) => {
                         const nextValue = event.target.value;
                         setInputValue(nextValue);
+                        setInputError(getFormatError(nextValue));
                         const parsedIso = parseInputToIso(nextValue);
                         if (parsedIso && isWithinLimits(parsedIso)) {
                             onChange(parsedIso);
@@ -162,8 +172,10 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
                         const parsedIso = parseInputToIso(inputValue);
                         if (parsedIso && isWithinLimits(parsedIso)) {
                             setInputValue(formatInputValue(parsedIso));
+                            setInputError(null);
                         } else {
                             setInputValue(formatInputValue(value));
+                            setInputError(null);
                         }
                     }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer bg-white"
@@ -288,6 +300,11 @@ export function DatePicker({ value, onChange, min, max, label, className = '' }:
                             Astăzi
                         </button>
                     </div>
+                </div>
+            )}
+            {inputError && (
+                <div className="mt-1 text-xs text-red-600">
+                    {inputError}
                 </div>
             )}
         </div>

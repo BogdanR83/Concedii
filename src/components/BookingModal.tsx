@@ -16,6 +16,7 @@ export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
     const [success, setSuccess] = React.useState(false);
     const [startDate, setStartDate] = React.useState<string>(formatDate(date));
     const [endDateState, setEndDateState] = React.useState<string>(endDate ? formatDate(endDate) : formatDate(date));
+    const minStartDate = formatDate(new Date(2025, 0, 1));
 
     // Update dates when props change
     React.useEffect(() => {
@@ -67,7 +68,7 @@ export function BookingModal({ date, endDate, onClose }: BookingModalProps) {
                                     setEndDateState(value);
                                 }
                             }}
-                            min={formatDate(new Date())}
+                            min={minStartDate}
                         />
                         <DatePicker
                             label="Data de sfârșit:"
